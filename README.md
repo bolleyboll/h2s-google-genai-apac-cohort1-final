@@ -257,7 +257,10 @@ flowchart LR
       end
     end
 
-    DB[AlloyDB<br/>Structured User Data]
+    subgraph ADB[AlloyDB]
+      DB[Structured User Data]
+    end
+
     SK <--> DB
   end
 
