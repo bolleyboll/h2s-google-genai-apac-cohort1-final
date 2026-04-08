@@ -103,6 +103,181 @@ flowchart TB
 
 Solid lines are core architecture for signed-in use. Dashed lines are optional Google product APIs or the transition from landing page to signed-in app.
 
+### Process Flow Diagram
+
+```mermaid
+flowchart TD
+    A[User opens sidekick.amngupta.com] --> B{Signed in with Google?}
+    B -- No --> C[Login with Google OAuth]
+    C --> D[OAuth callback + user session]
+    B -- Yes --> E[Chat/UI request]
+
+    D --> E
+    E --> F[Flask API proxy]
+    F --> G[ADK SidekickCoordinator]
+
+    G --> H{Intent routing}
+    H --> I[TaskSpecialist]
+    H --> J[ScheduleSpecialist]
+    H --> K[NotesSpecialist]
+    H --> L[Full Inventory Flow]
+
+    I --> M[Tasks tools]
+    J --> N[Schedule tools + time sanitize to UTC]
+    K --> O[Notes tools]
+    L --> P[list_sidekick_inventory]
+
+    M --> Q{Google API enabled?}
+    N --> R{Google API enabled?}
+    O --> S{Google API enabled?}
+
+    Q -- Yes --> T[Google Tasks update]
+    Q -- No --> U[DB-only task update]
+    R -- Yes --> V[Google Calendar update]
+    R -- No --> W[DB-only calendar update]
+    S -- Yes --> X[Google Keep update]
+    S -- No --> Y[DB-only notes update]
+
+    T --> Z[AlloyDB backup sync]
+    V --> Z
+    X --> Z
+    U --> Z
+    W --> Z
+    Y --> Z
+
+    Z --> AA[Unified response to UI]
+    AA --> AB[User views/edits items in Sidekick UI]
+```
+
+### Use Case Diagram
+
+```mermaid
+flowchart LR
+    U[User]
+    SK[Sidekick System]
+    GA[Google Account Services]
+    DB[AlloyDB]
+    MCP[MCP External Tools]
+
+    U --> UC1[Sign in / Sign out]
+    U --> UC2[Create task/event/note]
+    U --> UC3[List all inventory]
+    U --> UC4[Update/Delete items from UI]
+    U --> UC5[Ask multi-step workflow in chat]
+
+    UC1 --> SK
+    UC2 --> SK
+    UC3 --> SK
+    UC4 --> SK
+    UC5 --> SK
+
+    SK --> SC1[Coordinator routes to specialist]
+    SK --> SC2[Execute tools]
+    SK --> SC3[Return unified response]
+    SK --> SC4[Persist and query structured data]
+
+    SC2 --> GA
+    SC2 --> MCP
+    SC4 --> DB
+    GA --> DB
+```
+
+### Wireframe Diagram
+
+```mermaid
+flowchart TB
+  U[User Browser] --> D[sidekick.amngupta.com]
+  D --> CR[Cloud Run: Flask UI + API Proxy + ADK Runtime]
+
+  subgraph AGENTS[Multi-Agent Layer]
+    COORD[SidekickCoordinator]
+    TS[TaskSpecialist]
+    SS[ScheduleSpecialist]
+    NS[NotesSpecialist]
+    INV[list_sidekick_inventory shared tool]
+    COORD --> TS
+    COORD --> SS
+    COORD --> NS
+    COORD --> INV
+    TS --> INV
+    SS --> INV
+    NS --> INV
+  end
+
+  CR --> COORD
+
+  subgraph TOOLS[Tool Execution]
+    GT[Google Tasks API]
+    GC[Google Calendar API]
+    GK[Google Keep API]
+    MCP[MCP Toolsets optional]
+  end
+
+  TS --> GT
+  SS --> GC
+  NS --> GK
+  TS -. optional .-> MCP
+  SS -. optional .-> MCP
+  NS -. optional .-> MCP
+
+  subgraph DATA[Data Layer]
+    ADB[AlloyDB PostgreSQL]
+  end
+
+  GT --> ADB
+  GC --> ADB
+  GK --> ADB
+  INV --> ADB
+
+  subgraph NET[Network + Hosting]
+    VPC[Same VPC: Cloud Run <-> AlloyDB private connectivity]
+  end
+
+  CR --- VPC
+  ADB --- VPC
+
+  COORD --> OUT[Unified response to UI]
+  OUT --> U
+```
+
+### Architectural Diagram
+
+```mermaid
+flowchart LR
+  U[User] --> D[sidekick.amngupta.com]
+
+  subgraph VPC[Shared VPC]
+    subgraph CR[Cloud Run]
+      subgraph SK[Sidekick Application]
+        C[Coordinator Agent]
+        A1[Task Specialist]
+        A2[Schedule Specialist]
+        A3[Notes Specialist]
+        INV[Shared Inventory Tool]
+      end
+    end
+
+    DB[AlloyDB<br/>Structured User Data]
+    SK <--> DB
+  end
+
+  D --> SK
+
+  C --> A1
+  C --> A2
+  C --> A3
+  C --> INV
+  A1 --> INV
+  A2 --> INV
+  A3 --> INV
+
+  A1 --> GT[Google Tasks]
+  A2 --> GC[Google Calendar]
+  A3 --> GK[Google Keep]
+
+  C -->|Unified response| U
+```
+
 ### Your journey as a user
 
 **Production:** the landing page has **no chat** until you **Sign in with Google**; after that you can talk to the assistant.
