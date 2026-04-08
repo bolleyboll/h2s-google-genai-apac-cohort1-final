@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sidekick</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <script>
+    (function () {
+      try {
+        var key = 'sidekick_theme';
+        var t = localStorage.getItem(key);
+        if (t !== 'light' && t !== 'dark') {
+          t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
+  <script src="https://unpkg.com/marked@11.1.1/marked.min.js"></script>
+  <script src="https://unpkg.com/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <style>
+    :root {
+      --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    }
+    [data-theme='light'] {
+      color-scheme: light;
+      --bg: #f4f5f7;
+      --surface: #ffffff;
+      --border: #e2e5eb;
+      --text: #1a1d21;
+      --muted: #5c6370;
+      --accent: #2563eb;
+      --on-accent: #ffffff;
+      --user: #e8eef7;
+      --bot: #eef0f3;
+      --error-bg: #fef2f2;
+      --error-border: #fecaca;
+      --error-text: #991b1b;
+    }
+    [data-theme='dark'] {
+      color-scheme: dark;
+      --bg: #171717;
+      --surface: #262626;
+      --border: #404040;
+      --text: #fafafa;
+      --muted: #a3a3a3;
+      --accent: #3b82f6;
+      --on-accent: #0c1220;
+      --user: #1e3a5f;
+      --bot: #2a2a2a;
+      --error-bg: #3f1f1f;
+      --error-border: #7f1d1d;
+      --error-text: #fecaca;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    #app {
+      max-width: 42rem;
+      margin: 0 auto;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 1rem;
+    }
+    header {
+      padding: 0.5rem 0 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .header-top > div:first-child {
+      min-width: 0;
+    }
+    .theme-toggle {
+      flex-shrink: 0;
+      margin-top: 0.15rem;
+      padding: 0.35rem 0.65rem;
+      font: inherit;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .theme-toggle:hover {
+      border-color: var(--muted);
+    }
+    .theme-toggle:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+    header p {
+      margin: 0.35rem 0 0;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .toolbar {
+      margin-top: 0.75rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+    }
+    .toolbar a, .toolbar button.link {
+      color: var(--accent);
+      text-decoration: none;
+      background: none;
+      border: none;
+      font: inherit;
+      cursor: pointer;
+      padding: 0;
+    }
+    .toolbar a:hover, .toolbar button.link:hover { text-decoration: underline; }
+    .toolbar .muted { color: var(--muted); }
+    .login-wall {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      text-align: center;
+      padding: 2rem 1rem;
+    }
+    .login-wall a {
+      display: inline-block;
+      padding: 0.65rem 1.25rem;
+      background: var(--accent);
+      color: var(--on-accent);
+      font-weight: 600;
+      border-radius: 10px;
+      text-decoration: none;
+    }
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .bubble {
+      max-width: 92%;
+      padding: 0.65rem 0.85rem;
+      border-radius: 12px;
+      line-height: 1.45;
+      font-size: 0.95rem;
+      word-break: break-word;
+    }
+    .bubble-plain {
+      white-space: pre-wrap;
+    }
+    .bubble .md {
+      white-space: normal;
+    }
+    .bubble .md > :first-child {
+      margin-top: 0;
+    }
+    .bubble .md > :last-child {
+      margin-bottom: 0;
+    }
+    .bubble .md p {
+      margin: 0.4em 0;
+    }
+    .bubble .md ul,
+    .bubble .md ol {
+      margin: 0.4em 0;
+      padding-left: 1.35rem;
+    }
+    .bubble .md li {
+      margin: 0.2em 0;
+    }
+    .bubble .md li > p {
+      margin: 0.15em 0;
+    }
+    .bubble .md strong {
+      font-weight: 600;
+    }
+    .bubble .md a {
+      color: var(--accent);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .bubble .md a:hover {
+      text-decoration-thickness: 2px;
+    }
+    .bubble .md code {
+      font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+      font-size: 0.88em;
+      background: var(--surface);
+      padding: 0.12em 0.35em;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    .bubble .md pre {
+      margin: 0.5em 0;
+      padding: 0.65rem 0.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 0.85em;
+      line-height: 1.4;
+    }
+    .bubble .md pre code {
+      padding: 0;
+      border: none;
+      background: transparent;
+      font-size: inherit;
+    }
+    .bubble .md blockquote {
+      margin: 0.5em 0;
+      padding-left: 0.75rem;
+      border-left: 3px solid var(--border);
+      color: var(--muted);
+    }
+    .bubble .md h1,
+    .bubble .md h2,
+    .bubble .md h3 {
+      margin: 0.65em 0 0.35em;
+      font-size: 1.05em;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    .bubble .md h1:first-child,
+    .bubble .md h2:first-child,
+    .bubble .md h3:first-child {
+      margin-top: 0;
+    }
+    .bubble .md hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 0.75rem 0;
+    }
+    .bubble.user {
+      align-self: flex-end;
+      background: var(--user);
+      border: 1px solid var(--border);
+    }
+    .bubble.assistant {
+      align-self: flex-start;
+      background: var(--bot);
+      border: 1px solid var(--border);
+    }
+    .bubble.error {
+      align-self: stretch;
+      background: var(--error-bg);
+      border-color: var(--error-border);
+      color: var(--error-text);
+    }
+    .bubble.typing {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.5rem;
+      min-width: 3.5rem;
+      padding: 0.65rem 1rem;
+      animation: typing-pop 0.25s ease-out;
+    }
+    @keyframes typing-pop {
+      from {
+        opacity: 0;
+        transform: translateY(6px) scale(0.98);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+    .typing-dots {
+      display: flex;
+      align-items: center;
+      gap: 0.28rem;
+      padding: 0.15rem 0;
+    }
+    .typing-dots span {
+      width: 0.45rem;
+      height: 0.45rem;
+      border-radius: 50%;
+      background: var(--muted);
+      animation: typing-bounce 1.15s ease-in-out infinite;
+    }
+    .typing-dots span:nth-child(2) {
+      animation-delay: 0.15s;
+    }
+    .typing-dots span:nth-child(3) {
+      animation-delay: 0.3s;
+    }
+    @keyframes typing-bounce {
+      0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.35;
+      }
+      30% {
+        transform: translateY(-5px);
+        opacity: 1;
+      }
+    }
+    .composer {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--border);
+    }
+    .composer textarea {
+      flex: 1;
+      min-height: 3rem;
+      max-height: 8rem;
+      resize: vertical;
+      padding: 0.6rem 0.75rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font: inherit;
+    }
+    .composer button.send-btn {
+      flex-shrink: 0;
+      width: 3rem;
+      height: 3rem;
+      min-width: 3rem;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      border: none;
+      background: var(--accent);
+      color: var(--on-accent);
+      cursor: pointer;
+    }
+    .composer button.send-btn svg {
+      display: block;
+    }
+    .composer button.send-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    @media (max-width: 480px) {
+      .composer { flex-direction: column; align-items: stretch; }
+      .composer button.send-btn { align-self: flex-end; }
+    }
+    .site-footer {
+      margin-top: auto;
+      padding-top: 1.25rem;
+      font-size: 0.8125rem;
+      text-align: center;
+    }
+    .site-footer a {
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .site-footer a:hover {
+      color: var(--accent);
+      text-decoration: underline;
+    }
+    .tab-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.65rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab-btn {
+      padding: 0.4rem 0.75rem;
+      font: inherit;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .tab-btn:hover {
+      border-color: var(--muted);
+    }
+    .tab-btn.active {
+      border-color: var(--accent);
+      background: var(--user);
+    }
+    .tab-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .inventory-panel {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem 0;
+      min-height: 8rem;
+    }
+    .inv-error {
+      padding: 0.65rem 0.75rem;
+      background: var(--error-bg);
+      border: 1px solid var(--error-border);
+      color: var(--error-text);
+      border-radius: 8px;
+      margin-bottom: 0.75rem;
+      font-size: 0.85rem;
+    }
+    .inv-loading {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .inv-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem 0.85rem;
+      margin-bottom: 0.65rem;
+    }
+    .inv-card h3 {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 600;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    .inv-card-meta {
+      margin-top: 0.4rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .inv-hint {
+      margin-top: 0.35rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-style: italic;
+    }
+    .inv-actions {
+      margin-top: 0.55rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+    .inv-actions a {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.35rem 0.65rem;
+      font-size: 0.8rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .inv-actions a:hover {
+      border-color: var(--muted);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .inv-actions a:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .btn-sm {
+      padding: 0.35rem 0.65rem;
+      font: inherit;
+      font-size: 0.8rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .btn-sm:hover {
+      border-color: var(--muted);
+    }
+    .btn-sm:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-sm.danger {
+      color: var(--error-text);
+      border-color: var(--error-border);
+    }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 1rem;
+    }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+      max-width: 100%;
+      width: 22rem;
+      max-height: 88vh;
+      overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    }
+    [data-theme='dark'] .modal {
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    }
+    .modal h3 {
+      margin: 0 0 0.85rem;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .field {
+      margin-bottom: 0.65rem;
+    }
+    .field label {
+      display: block;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+    }
+    .field input,
+    .field textarea,
+    .field select {
+      width: 100%;
+      padding: 0.5rem 0.6rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font: inherit;
+      font-size: 0.9rem;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .field textarea {
+      min-height: 5rem;
+      resize: vertical;
+    }
+    .modal-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      justify-content: flex-end;
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="header-top">
+        <div>
+          <h1>Sidekick</h1>
+          <p>Events, tasks and notes — powered by agentic AI.</p>
+        </div>
+        <button
+          type="button"
+          class="theme-toggle"
+          @click="toggleTheme"
+          :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+        >
+          {{ theme === 'dark' ? 'Light' : 'Dark' }}
+        </button>
+      </div>
+      <div class="toolbar" v-if="authReady">
+        <template v-if="oauthEnabled && signedIn">
+          <span class="muted">{{ userEmail || userSub }}</span>
+          <a href="/logout">Sign out</a>
+        </template>
+        <template v-else-if="oauthEnabled && !signedIn">
+          <a href="/login/google">Sign in with Google</a>
+        </template>
+        <template v-else>
+          <span class="muted">Open mode (OAuth not configured)</span>
+        </template>
+      </div>
+    </header>
+
+    <div v-if="oauthEnabled && !signedIn" class="login-wall">
+      <p>Sign in with Google to use the assistant.</p>
+      <a href="/login/google">Sign in with Google</a>
+    </div>
+
+    <template v-else-if="signedIn || !oauthEnabled">
+      <div class="tab-bar" role="tablist" aria-label="Main views">
+        <button
+          type="button"
+          class="tab-btn"
+          :class="{ active: mainTab === 'chat' }"
+          role="tab"
+          :aria-selected="mainTab === 'chat'"
+          @click="setMainTab('chat')"
+        >Chat</button>
+        <button
+          type="button"
+          class="tab-btn"
+          :class="{ active: mainTab === 'tasks' }"
+          role="tab"
+          :aria-selected="mainTab === 'tasks'"
+          @click="setMainTab('tasks')"
+        >Tasks</button>
+        <button
+          type="button"
+          class="tab-btn"
+          :class="{ active: mainTab === 'calendar' }"
+          role="tab"
+          :aria-selected="mainTab === 'calendar'"
+          @click="setMainTab('calendar')"
+        >Calendar</button>
+        <button
+          type="button"
+          class="tab-btn"
+          :class="{ active: mainTab === 'notes' }"
+          role="tab"
+          :aria-selected="mainTab === 'notes'"
+          @click="setMainTab('notes')"
+        >Notes</button>
+      </div>
+
+      <div v-show="mainTab === 'chat'" class="messages">
+        <div
+          v-for="(m, i) in messages"
+          :key="i"
+          class="bubble"
+          :class="m.role"
+        >
+          <div v-if="m.role === 'error'" class="bubble-plain">{{ m.text }}</div>
+          <div v-else class="md" v-html="markdownHtml(m.text)"></div>
+        </div>
+        <div
+          v-if="busy"
+          ref="typingBubble"
+          class="bubble assistant typing"
+          role="status"
+          aria-live="polite"
+          aria-label="Assistant is responding"
+        >
+          <span class="typing-dots" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+        </div>
+      </div>
+      <div v-show="mainTab === 'chat'" class="composer">
+        <textarea
+          v-model="input"
+          placeholder="Ask anything…"
+          @keydown.enter.exact.prevent="send"
+        ></textarea>
+        <button
+          type="button"
+          class="send-btn"
+          :disabled="busy || !input.trim() || !sessionId"
+          aria-label="Send message"
+          @click="send"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M22 2 11 13" />
+            <path d="M22 2 15 22 11 13 2 9 22 2z" />
+          </svg>
+        </button>
+      </div>
+
+      <div v-if="mainTab === 'tasks'" class="inventory-panel">
+        <div v-if="invError.tasks" class="inv-error">{{ invError.tasks }}</div>
+        <p v-if="invLoading.tasks" class="inv-loading">Loading tasks…</p>
+        <template v-else>
+          <p v-if="!inv.tasks.items.length" class="inv-loading">No tasks yet. Create items via chat.</p>
+          <article v-for="t in inv.tasks.items" :key="'t'+t.id" class="inv-card">
+            <h3>{{ t.title }}</h3>
+            <div class="inv-card-meta">Status: {{ t.status }}{{ t.due_at ? '\nDue: ' + formatWhen(t.due_at) : '' }}{{ t.created_at ? '\nCreated: ' + formatWhen(t.created_at) : '' }}</div>
+            <p v-if="inv.tasks.google_api_enabled && !taskRowEditable(t)" class="inv-hint">Not synced to Google — view only.</p>
+            <div class="inv-actions">
+              <a v-if="t.google_quick_link" :href="t.google_quick_link" target="_blank" rel="noopener noreferrer">Open in Google</a>
+              <button type="button" class="btn-sm" :disabled="!taskRowEditable(t) || invSaving" @click="openEdit('tasks', t)">Edit</button>
+              <button type="button" class="btn-sm danger" :disabled="!taskRowEditable(t) || invSaving" @click="confirmDelete('tasks', t)">Delete</button>
+            </div>
+          </article>
+        </template>
+      </div>
+
+      <div v-if="mainTab === 'calendar'" class="inventory-panel">
+        <div v-if="invError.calendar" class="inv-error">{{ invError.calendar }}</div>
+        <p v-if="invLoading.calendar" class="inv-loading">Loading events…</p>
+        <template v-else>
+          <p v-if="!inv.calendar.items.length" class="inv-loading">No events yet. Create items via chat.</p>
+          <article v-for="e in inv.calendar.items" :key="'e'+e.id" class="inv-card">
+            <h3>{{ e.title }}</h3>
+            <div class="inv-card-meta">Start: {{ formatWhen(e.start_at) }}{{ e.end_at ? '\nEnd: ' + formatWhen(e.end_at) : '' }}{{ e.notes ? '\nNotes: ' + e.notes : '' }}</div>
+            <p v-if="inv.calendar.google_api_enabled && !calendarRowEditable(e)" class="inv-hint">Not synced to Google — view only.</p>
+            <div class="inv-actions">
+              <a v-if="e.google_quick_link" :href="e.google_quick_link" target="_blank" rel="noopener noreferrer">Open in Google</a>
+              <button type="button" class="btn-sm" :disabled="!calendarRowEditable(e) || invSaving" @click="openEdit('calendar', e)">Edit</button>
+              <button type="button" class="btn-sm danger" :disabled="!calendarRowEditable(e) || invSaving" @click="confirmDelete('calendar', e)">Delete</button>
+            </div>
+          </article>
+        </template>
+      </div>
+
+      <div v-if="mainTab === 'notes'" class="inventory-panel">
+        <div v-if="invError.notes" class="inv-error">{{ invError.notes }}</div>
+        <p v-if="invLoading.notes" class="inv-loading">Loading notes…</p>
+        <template v-else>
+          <p v-if="!inv.notes.items.length" class="inv-loading">No notes yet. Create items via chat.</p>
+          <article v-for="n in inv.notes.items" :key="'n'+n.id" class="inv-card">
+            <h3>{{ n.title }}</h3>
+            <div class="inv-card-meta">{{ n.body || '(no body)' }}</div>
+            <p v-if="inv.notes.google_api_enabled && !noteRowEditable(n)" class="inv-hint">Not synced to Google — view only.</p>
+            <div class="inv-actions">
+              <a v-if="n.google_quick_link" :href="n.google_quick_link" target="_blank" rel="noopener noreferrer">Open in Google</a>
+              <button type="button" class="btn-sm" :disabled="!noteRowEditable(n) || invSaving" @click="openEdit('notes', n)">Edit</button>
+              <button type="button" class="btn-sm danger" :disabled="!noteRowEditable(n) || invSaving" @click="confirmDelete('notes', n)">Delete</button>
+            </div>
+          </article>
+        </template>
+      </div>
+
+      <div v-if="editOpen" class="modal-backdrop" role="dialog" aria-modal="true" @click.self="closeEdit">
+        <div class="modal" @click.stop>
+          <h3>{{ editTitle }}</h3>
+          <template v-if="editDomain === 'tasks'">
+            <div class="field">
+              <label for="ef-title">Title</label>
+              <input id="ef-title" v-model="editForm.title" type="text" autocomplete="off" />
+            </div>
+            <div v-if="inv.tasks.google_api_enabled" class="field">
+              <label for="ef-notes">Notes (Google Tasks)</label>
+              <textarea id="ef-notes" v-model="editForm.notes"></textarea>
+            </div>
+            <div class="field">
+              <label for="ef-due">{{ inv.tasks.google_api_enabled ? 'Due (RFC3339, optional)' : 'Due (ISO / optional)' }}</label>
+              <input id="ef-due" v-model="editForm.due" type="text" placeholder="e.g. 2026-04-09T12:00:00Z" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="ef-status">Status</label>
+              <select id="ef-status" v-model="editForm.status">
+                <template v-if="inv.tasks.google_api_enabled">
+                  <option value="needsAction">Open (needsAction)</option>
+                  <option value="completed">Completed</option>
+                </template>
+                <template v-else>
+                  <option value="open">Open</option>
+                  <option value="completed">Completed</option>
+                </template>
+              </select>
+            </div>
+          </template>
+          <template v-else-if="editDomain === 'calendar'">
+            <div class="field">
+              <label for="efc-title">Title</label>
+              <input id="efc-title" v-model="editForm.title" type="text" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="efc-start">Start (RFC3339)</label>
+              <input id="efc-start" v-model="editForm.start_at" type="text" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="efc-end">End (RFC3339)</label>
+              <input id="efc-end" v-model="editForm.end_at" type="text" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="efc-desc">Description / notes</label>
+              <textarea id="efc-desc" v-model="editForm.notes"></textarea>
+            </div>
+          </template>
+          <template v-else-if="editDomain === 'notes'">
+            <div class="field">
+              <label for="efn-title">Title</label>
+              <input id="efn-title" v-model="editForm.title" type="text" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="efn-body">Body</label>
+              <textarea id="efn-body" v-model="editForm.body"></textarea>
+            </div>
+          </template>
+          <div v-if="editError" class="inv-error" style="margin-top:0.5rem">{{ editError }}</div>
+          <div class="modal-actions">
+            <button type="button" class="btn-sm" @click="closeEdit" :disabled="invSaving">Cancel</button>
+            <button type="button" class="btn-sm" @click="saveEdit" :disabled="invSaving">{{ invSaving ? 'Saving…' : 'Save' }}</button>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <footer class="site-footer">
+      <a href="/privacy-policy">Privacy policy</a>
+      <span aria-hidden="true"> · </span>
+      <a href="/terms-and-conditions">Terms of Service</a>
+    </footer>
+  </div>
+  <script>
+    const { createApp } = Vue;
+    const APP = 'sidekick';
+    const THEME_STORAGE_KEY = 'sidekick_theme';
+    const PLACEHOLDER_USER = 'web-ui';
+
+    function readThemeFromDocument() {
+      var t = document.documentElement.getAttribute('data-theme');
+      return t === 'light' || t === 'dark' ? t : 'light';
+    }
+
+    const fetchOpts = { credentials: 'same-origin' };
+
+    function sessionStorageKey(sub) {
+      return sub ? `sidekick_session_id_${sub}` : 'sidekick_session_id';
+    }
+
+    function newClientSessionId() {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+      }
+      return 's-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+    }
+
+    function textFromEvents(events) {
+      if (!Array.isArray(events)) return JSON.stringify(events, null, 2);
+      const parts = [];
+      for (const ev of events) {
+        if (!ev || ev.author === 'user') continue;
+        const plist = ev.content && ev.content.parts ? ev.content.parts : [];
+        for (const p of plist) {
+          if (p.text) parts.push(p.text);
+        }
+      }
+      const s = parts.join('\n').trim();
+      return s || '(No assistant text in response.)';
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function markdownHtml(text) {
+      const s = text == null ? '' : String(text);
+      if (!s.trim()) return '';
+      if (typeof DOMPurify === 'undefined') {
+        const el = document.createElement('div');
+        el.textContent = s;
+        return el.innerHTML.replace(/\n/g, '<br>');
+      }
+      let raw;
+      if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
+        raw = marked.parse(s, { breaks: true, gfm: true });
+      } else {
+        raw = '<p>' + escapeHtml(s).replace(/\n/g, '<br>') + '</p>';
+      }
+      return DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } });
+    }
+
+    function emptyInv() {
+      return { google_api_enabled: false, items: [] };
+    }
+
+    createApp({
+      data() {
+        return {
+          authReady: false,
+          oauthEnabled: false,
+          signedIn: false,
+          userSub: null,
+          userEmail: '',
+          messages: [
+            { role: 'assistant', text: 'Hi! I can help with tasks, your schedule, and notes. What would you like to do?' },
+          ],
+          input: '',
+          busy: false,
+          sessionId: null,
+          theme: readThemeFromDocument(),
+          mainTab: 'chat',
+          inv: { tasks: emptyInv(), calendar: emptyInv(), notes: emptyInv() },
+          invLoading: { tasks: false, calendar: false, notes: false },
+          invError: { tasks: '', calendar: '', notes: '' },
+          invSaving: false,
+          editOpen: false,
+          editDomain: null,
+          editRow: null,
+          editForm: {},
+          editError: '',
+        };
+      },
+      computed: {
+        editTitle() {
+          if (this.editDomain === 'tasks') return 'Edit task';
+          if (this.editDomain === 'calendar') return 'Edit event';
+          if (this.editDomain === 'notes') return 'Edit note';
+          return 'Edit';
+        },
+      },
+      async mounted() {
+        const me = await fetch('/auth/me', fetchOpts);
+        const meData = await me.json().catch(() => ({}));
+        this.oauthEnabled = meData.oauth_enabled === true;
+        if (!this.oauthEnabled) {
+          this.signedIn = true;
+          this.userSub = null;
+        } else if (me.ok && meData.sub) {
+          this.signedIn = true;
+          this.userSub = meData.sub;
+          this.userEmail = meData.email || '';
+        } else {
+          this.signedIn = false;
+        }
+        this.authReady = true;
+
+        if (!this.signedIn && this.oauthEnabled) return;
+
+        const key = sessionStorageKey(this.userSub);
+        let sid = localStorage.getItem(key);
+        if (!sid) {
+          const res = await fetch(`/api/apps/${APP}/users/${PLACEHOLDER_USER}/sessions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+            ...fetchOpts,
+          });
+          if (res.status === 401) {
+            this.oauthEnabled = true;
+            this.signedIn = false;
+            this.messages.push({ role: 'error', text: 'Session expired — please sign in again.' });
+            return;
+          }
+          if (res.ok) {
+            const data = await res.json();
+            sid = data.id || data.sessionId;
+          } else if (res.status === 404) {
+            /* ADK is started with auto_create_session=True; first /run will persist this id. */
+            sid = newClientSessionId();
+          } else {
+            const hint = await res.text().catch(() => '');
+            this.messages.push({
+              role: 'error',
+              text:
+                'Could not create session: ' +
+                res.status +
+                (hint ? ' — ' + hint.slice(0, 240) : ''),
+            });
+            return;
+          }
+          localStorage.setItem(key, sid);
+        }
+        this.sessionId = sid;
+      },
+      methods: {
+        markdownHtml,
+        formatWhen(s) {
+          if (s == null || s === '') return '—';
+          try {
+            const d = new Date(s);
+            if (Number.isNaN(d.getTime())) return String(s);
+            return d.toLocaleString();
+          } catch {
+            return String(s);
+          }
+        },
+        taskRowEditable(t) {
+          if (!this.inv.tasks.google_api_enabled) return true;
+          return !!(t.google_task_id && String(t.google_task_id).trim());
+        },
+        calendarRowEditable(e) {
+          if (!this.inv.calendar.google_api_enabled) return true;
+          return !!(e.google_event_id && String(e.google_event_id).trim());
+        },
+        noteRowEditable(n) {
+          if (!this.inv.notes.google_api_enabled) return true;
+          return !!(n.google_keep_note_name && String(n.google_keep_note_name).trim());
+        },
+        async setMainTab(tab) {
+          this.mainTab = tab;
+          if (tab === 'tasks') await this.loadInventory('tasks');
+          else if (tab === 'calendar') await this.loadInventory('calendar');
+          else if (tab === 'notes') await this.loadInventory('notes');
+        },
+        async loadInventory(kind) {
+          const paths = {
+            tasks: '/ui-api/inventory/tasks',
+            calendar: '/ui-api/inventory/calendar',
+            notes: '/ui-api/inventory/notes',
+          };
+          this.invLoading[kind] = true;
+          this.invError[kind] = '';
+          try {
+            const res = await fetch(paths[kind], { ...fetchOpts, headers: { Accept: 'application/json' } });
+            const data = await res.json().catch(() => ({}));
+            if (res.status === 401) {
+              this.invError[kind] = 'Sign in required.';
+              return;
+            }
+            if (!res.ok) {
+              this.invError[kind] = (data && data.message) || data.error || 'Load failed (' + res.status + ')';
+              return;
+            }
+            this.inv[kind] = {
+              google_api_enabled: !!data.google_api_enabled,
+              items: Array.isArray(data.items) ? data.items : [],
+            };
+          } catch (e) {
+            this.invError[kind] = String(e);
+          } finally {
+            this.invLoading[kind] = false;
+          }
+        },
+        openEdit(domain, row) {
+          this.editDomain = domain;
+          this.editRow = row;
+          this.editError = '';
+          if (domain === 'tasks') {
+            const g = this.inv.tasks.google_api_enabled;
+            let st = row.status || 'open';
+            if (g && st === 'open') st = 'needsAction';
+            this.editForm = {
+              title: row.title || '',
+              notes: g ? (row.notes != null ? row.notes : '') : '',
+              due: row.due_at ? String(row.due_at) : '',
+              status: g ? (row.status === 'completed' ? 'completed' : 'needsAction') : st,
+            };
+          } else if (domain === 'calendar') {
+            this.editForm = {
+              title: row.title || '',
+              start_at: row.start_at ? String(row.start_at) : '',
+              end_at: row.end_at ? String(row.end_at) : '',
+              notes: row.notes != null ? row.notes : '',
+            };
+          } else if (domain === 'notes') {
+            this.editForm = {
+              title: row.title || '',
+              body: row.body != null ? row.body : '',
+            };
+          }
+          this.editOpen = true;
+        },
+        closeEdit(force) {
+          if (this.invSaving && force !== true) return;
+          this.editOpen = false;
+          this.editDomain = null;
+          this.editRow = null;
+          this.editForm = {};
+          this.editError = '';
+        },
+        async saveEdit() {
+          if (!this.editDomain || !this.editRow) return;
+          const invKind = this.editDomain;
+          this.invSaving = true;
+          this.editError = '';
+          try {
+            const row = this.editRow;
+            let url = '';
+            const method = 'PATCH';
+            let body = null;
+            const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+
+            if (this.editDomain === 'tasks') {
+              if (
+                !this.inv.tasks.google_api_enabled &&
+                !String(this.editForm.title || '').trim()
+              ) {
+                this.editError = 'Title is required.';
+                return;
+              }
+              if (this.inv.tasks.google_api_enabled) {
+                const tl = row.google_tasklist_id || '@default';
+                const q = new URLSearchParams({ tasklist_id: tl });
+                url = '/ui-api/google/tasks/' + encodeURIComponent(row.google_task_id) + '?' + q.toString();
+                const p = {};
+                if (String(this.editForm.title).trim()) p.title = String(this.editForm.title).trim();
+                if (this.editForm.status) p.status = this.editForm.status;
+                if (this.editForm.due && String(this.editForm.due).trim()) {
+                  p.due_rfc3339 = String(this.editForm.due).trim();
+                }
+                if (this.editForm.notes != null && String(this.editForm.notes).trim()) {
+                  p.notes = String(this.editForm.notes).trim();
+                }
+                if (Object.keys(p).length === 0) {
+                  this.editError = 'Change at least one field.';
+                  return;
+                }
+                body = JSON.stringify(p);
+              } else {
+                url = '/ui-api/db/tasks/' + encodeURIComponent(row.id);
+                body = JSON.stringify({
+                  title: String(this.editForm.title).trim(),
+                  status: this.editForm.status,
+                  due_at:
+                    this.editForm.due && String(this.editForm.due).trim()
+                      ? String(this.editForm.due).trim()
+                      : null,
+                });
+              }
+            } else if (this.editDomain === 'calendar') {
+              const p = {};
+              if (String(this.editForm.title || '').trim()) p.title = String(this.editForm.title).trim();
+              if (String(this.editForm.start_at || '').trim()) p.start_at = String(this.editForm.start_at).trim();
+              if (String(this.editForm.end_at || '').trim()) p.end_at = String(this.editForm.end_at).trim();
+              if (this.editForm.notes != null && String(this.editForm.notes).trim()) {
+                p.notes = String(this.editForm.notes).trim();
+              }
+              if (this.inv.calendar.google_api_enabled) {
+                const gp = {};
+                if (String(this.editForm.title || '').trim()) gp.summary = String(this.editForm.title).trim();
+                if (String(this.editForm.start_at || '').trim()) gp.start_at = String(this.editForm.start_at).trim();
+                if (String(this.editForm.end_at || '').trim()) gp.end_at = String(this.editForm.end_at).trim();
+                if (this.editForm.notes != null && String(this.editForm.notes).trim()) {
+                  gp.description = String(this.editForm.notes).trim();
+                }
+                if (Object.keys(gp).length === 0) {
+                  this.editError = 'Change at least one field.';
+                  return;
+                }
+                url = '/ui-api/google/calendar/' + encodeURIComponent(row.google_event_id);
+                body = JSON.stringify(gp);
+              } else {
+                if (Object.keys(p).length === 0) {
+                  this.editError = 'Change at least one field.';
+                  return;
+                }
+                url = '/ui-api/db/calendar/' + encodeURIComponent(row.id);
+                body = JSON.stringify(p);
+              }
+            } else if (this.editDomain === 'notes') {
+              const np = {};
+              if (String(this.editForm.title || '').trim()) np.title = String(this.editForm.title).trim();
+              if (this.editForm.body !== undefined) np.body = this.editForm.body;
+              if (Object.keys(np).length === 0) {
+                this.editError = 'Change at least one field.';
+                return;
+              }
+              if (this.inv.notes.google_api_enabled) {
+                url =
+                  '/ui-api/google/notes/' +
+                  encodeURIComponent(String(row.google_keep_note_name));
+              } else {
+                url = '/ui-api/db/notes/' + encodeURIComponent(row.id);
+              }
+              body = JSON.stringify(np);
+            }
+
+            const res = await fetch(url, { method, headers, body, ...fetchOpts });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              this.editError =
+                (data && data.message) || data.error || data.details || 'Save failed (' + res.status + ')';
+              return;
+            }
+            this.closeEdit(true);
+            await this.loadInventory(invKind);
+          } catch (e) {
+            this.editError = String(e);
+          } finally {
+            this.invSaving = false;
+          }
+        },
+        confirmDelete(domain, row) {
+          if (!window.confirm('Delete this item? This cannot be undone.')) return;
+          this.deleteRow(domain, row);
+        },
+        async deleteRow(domain, row) {
+          this.invSaving = true;
+          this.invError[domain] = '';
+          try {
+            let url = '';
+            if (domain === 'tasks') {
+              if (this.inv.tasks.google_api_enabled) {
+                const tl = row.google_tasklist_id || '@default';
+                url =
+                  '/ui-api/google/tasks/' +
+                  encodeURIComponent(row.google_task_id) +
+                  '?tasklist_id=' +
+                  encodeURIComponent(tl);
+              } else {
+                url = '/ui-api/db/tasks/' + encodeURIComponent(row.id);
+              }
+            } else if (domain === 'calendar') {
+              if (this.inv.calendar.google_api_enabled) {
+                url = '/ui-api/google/calendar/' + encodeURIComponent(row.google_event_id);
+              } else {
+                url = '/ui-api/db/calendar/' + encodeURIComponent(row.id);
+              }
+            } else if (domain === 'notes') {
+              if (this.inv.notes.google_api_enabled) {
+                url =
+                  '/ui-api/google/notes/' +
+                  encodeURIComponent(String(row.google_keep_note_name));
+              } else {
+                url = '/ui-api/db/notes/' + encodeURIComponent(row.id);
+              }
+            }
+            const res = await fetch(url, { method: 'DELETE', ...fetchOpts, headers: { Accept: 'application/json' } });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              this.invError[domain] =
+                (data && data.message) || data.error || 'Delete failed (' + res.status + ')';
+              return;
+            }
+            await this.loadInventory(domain);
+          } catch (e) {
+            this.invError[domain] = String(e);
+          } finally {
+            this.invSaving = false;
+          }
+        },
+        toggleTheme() {
+          const next = this.theme === 'dark' ? 'light' : 'dark';
+          this.theme = next;
+          document.documentElement.setAttribute('data-theme', next);
+          try {
+            localStorage.setItem(THEME_STORAGE_KEY, next);
+          } catch (e) {}
+        },
+        async send() {
+          const t = this.input.trim();
+          if (!t || this.busy) return;
+          if (!this.sessionId) {
+            this.messages.push({ role: 'error', text: 'Session not ready yet.' });
+            return;
+          }
+          this.input = '';
+          this.messages.push({ role: 'user', text: t });
+          this.busy = true;
+          this.$nextTick(() => {
+            const el = this.$refs.typingBubble;
+            if (el && typeof el.scrollIntoView === 'function') {
+              el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+          });
+          try {
+            const res = await fetch('/api/run', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                app_name: APP,
+                user_id: PLACEHOLDER_USER,
+                session_id: this.sessionId,
+                new_message: { role: 'user', parts: [{ text: t }] },
+                streaming: false,
+              }),
+              ...fetchOpts,
+            });
+            const raw = await res.text();
+            if (res.status === 401) {
+              this.messages.push({ role: 'error', text: 'Unauthorized — please sign in again.' });
+              this.signedIn = false;
+              return;
+            }
+            if (!res.ok) {
+              this.messages.push({ role: 'error', text: 'Request failed (' + res.status + '): ' + raw });
+              return;
+            }
+            let events;
+            try {
+              events = JSON.parse(raw);
+            } catch {
+              this.messages.push({ role: 'assistant', text: raw });
+              return;
+            }
+            this.messages.push({ role: 'assistant', text: textFromEvents(events) });
+          } catch (e) {
+            this.messages.push({ role: 'error', text: String(e) });
+          } finally {
+            this.busy = false;
+          }
+        },
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>

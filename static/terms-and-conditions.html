@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Terms of Service — Sidekick</title>
+  <script>
+    (function () {
+      try {
+        var key = 'sidekick_theme';
+        var t = localStorage.getItem(key);
+        if (t !== 'light' && t !== 'dark') {
+          t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    :root { --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; }
+    [data-theme='light'] {
+      color-scheme: light;
+      --bg: #f4f5f7;
+      --border: #e2e5eb;
+      --text: #1a1d21;
+      --muted: #5c6370;
+      --accent: #2563eb;
+    }
+    [data-theme='dark'] {
+      color-scheme: dark;
+      --bg: #171717;
+      --border: #404040;
+      --text: #fafafa;
+      --muted: #a3a3a3;
+      --accent: #3b82f6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 40rem;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 3rem;
+    }
+    .nav { margin-bottom: 1.5rem; font-size: 0.9375rem; }
+    .nav a { color: var(--accent); }
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 600;
+      margin: 0 0 0.25rem;
+      letter-spacing: -0.02em;
+    }
+    .updated { color: var(--muted); font-size: 0.875rem; margin: 0 0 2rem; }
+    h2 {
+      font-size: 1.125rem;
+      font-weight: 600;
+      margin: 2rem 0 0.75rem;
+      border-top: 1px solid var(--border);
+      padding-top: 1.5rem;
+    }
+    h2:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+    h3 { font-size: 1rem; font-weight: 600; margin: 1.25rem 0 0.5rem; }
+    p, li { margin: 0.5rem 0; }
+    ul { padding-left: 1.25rem; margin: 0.5rem 0; }
+    .muted { color: var(--muted); font-size: 0.875rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="nav"><a href="/">← Back to Sidekick</a> · <a href="/privacy-policy">Privacy policy</a></p>
+    <h1>Terms of Service</h1>
+    <p class="updated">Last updated: April 8, 2026</p>
+
+    <h2>1. Introduction</h2>
+    <p>
+      Welcome to <strong>Sidekick</strong> (“we”, “our”, “us”). These Terms of Service (“Terms”)
+      govern your access to and use of the Sidekick website, web application, and related services
+      (collectively, the “Service”), including the AI-assisted assistant and integrations with
+      Google services where enabled.
+    </p>
+    <p>
+      The Service is offered in connection with <strong>sidekick.amngupta.com</strong> and related
+      deployments operated by the service operator. For notices and legal inquiries:
+      <a href="mailto:amngupta@protonmail.com">amngupta@protonmail.com</a>.
+    </p>
+    <p>
+      These Terms, together with our
+      <a href="/privacy-policy">Privacy Policy</a>, form the agreement between you and us regarding
+      the Service. By accessing or using the Service, you confirm that you have read these Terms,
+      understand them, and agree to be bound by them. If you do not agree, do not use the Service.
+    </p>
+    <p>
+      Where applicable, these Terms are intended to align with principles reflected in Indian
+      digital and consumer laws (including the Information Technology Act, 2000, the Digital
+      Personal Data Protection Act, 2023, and the Consumer Protection Act, 2019), without limiting
+      mandatory rights you may have elsewhere.
+    </p>
+
+    <h2>2. Definitions</h2>
+    <ul>
+      <li><strong>“Platform”</strong> means the web interfaces through which Sidekick is provided.</li>
+      <li><strong>“User”</strong>, <strong>“you”</strong>, <strong>“your”</strong> means anyone who accesses or uses the Service.</li>
+      <li><strong>“User Content”</strong> means text, instructions, or other material you submit to the Service (for example chat messages or data you ask us to store or sync).</li>
+    </ul>
+
+    <h2>3. Eligibility</h2>
+    <p>
+      The Service is intended for users who are at least <strong>18 years of age</strong>, or who
+      use the Service only with the involvement and consent of a parent or legal guardian where
+      local law requires it. We may suspend access if eligibility requirements are not met.
+    </p>
+
+    <h2>4. Account registration and security</h2>
+    <p>
+      Access may require signing in with <strong>Google</strong> or another method we provide. You
+      agree to provide accurate information, keep credentials confidential, and not share your
+      account with others. You are responsible for activity under your account. Notify us promptly
+      at <a href="mailto:amngupta@protonmail.com">amngupta@protonmail.com</a> if you suspect
+      unauthorized use.
+    </p>
+    <p>
+      We may refuse service, suspend, or terminate access where we reasonably believe there is
+      misuse, fraud, a security risk, or a breach of these Terms. Where practicable, we will
+      explain the reason.
+    </p>
+
+    <h2>5. Communications</h2>
+    <p>
+      We may send transactional or operational communications related to the Service (for example
+      security or account notices) using the contact details associated with your account. If we
+      introduce optional marketing communications, we will provide a clear way to opt out, and
+      opting out will not block essential service messages.
+    </p>
+
+    <h2>6. Fees</h2>
+    <p>
+      The Service may currently be provided <strong>without charge</strong>. We reserve the right
+      to introduce fees or paid features with reasonable notice. Continued use after such notice
+      may constitute acceptance of new pricing where required by law.
+    </p>
+
+    <h2>7. User Content and licence</h2>
+    <p>
+      You retain ownership of your User Content. You represent that you have the rights necessary
+      to submit it and that it does not violate applicable law or third-party rights.
+    </p>
+    <p>
+      You grant us a non-exclusive, worldwide, royalty-free licence to host, process, transmit, and
+      display User Content <strong>solely to operate, secure, and improve the Service</strong>,
+      including sending content to AI and Google APIs as described in our Privacy Policy. This
+      licence ends when you delete relevant content or close your account, except where retention is
+      required for legal or security reasons.
+    </p>
+
+    <h2>8. Artificial intelligence</h2>
+    <p>
+      The Service may use generative AI. Outputs may be inaccurate, incomplete, or unsuitable for
+      your situation. <strong>AI responses are not professional, legal, financial, or medical
+      advice.</strong> You are solely responsible for how you use outputs and for verifying
+      important information. Do not rely on the Service for high-risk decisions without independent
+      verification.
+    </p>
+
+    <h2>9. Intellectual property</h2>
+    <p>
+      The Service, its branding, software, and documentation are owned by us or our licensors.
+      Subject to these Terms, we grant you a limited, personal, non-exclusive, non-transferable
+      licence to use the Service for its intended purpose. You may not copy, modify, distribute,
+      sell, or reverse engineer the Service except as allowed by mandatory law.
+    </p>
+
+    <h2>10. Prohibited uses</h2>
+    <p>You agree not to use the Service to:</p>
+    <ul>
+      <li>Violate any applicable law or regulation.</li>
+      <li>Infringe intellectual property or privacy rights of others.</li>
+      <li>Transmit malware, attempt unauthorized access, or disrupt the Service or third-party systems.</li>
+      <li>Scrape, crawl, or collect data from the Service using automated means without our prior written consent.</li>
+      <li>Harass, harm, or exploit minors or any person.</li>
+      <li>Send spam or misleading content.</li>
+      <li>Misrepresent your identity or affiliation.</li>
+    </ul>
+    <p>
+      We may investigate and take appropriate action, including removing content and terminating
+      access, for violations of this section.
+    </p>
+
+    <h2>11. Third-party services</h2>
+    <p>
+      The Service integrates with <strong>Google</strong> (sign-in, Calendar, Tasks, Keep where
+      available, AI, and cloud infrastructure). Your use of those services is also subject to
+      Google’s terms and policies. We are not responsible for third-party services or their
+      availability.
+    </p>
+
+    <h2>12. Changes to the Service</h2>
+    <p>
+      We may modify, suspend, or discontinue features of the Service at any time. We will provide
+      notice of material adverse changes where reasonable and where required by law. We are not
+      liable for any modification, suspension, or discontinuance except as required by applicable
+      law.
+    </p>
+
+    <h2>13. Disclaimer of warranties</h2>
+    <p>
+      The Service is provided <strong>“as is”</strong> and <strong>“as available”</strong>. To the
+      fullest extent permitted by law, we disclaim all warranties, express or implied, including
+      merchantability, fitness for a particular purpose, and non-infringement. We do not warrant
+      uninterrupted or error-free operation.
+    </p>
+
+    <h2>14. Limitation of liability</h2>
+    <p>
+      To the maximum extent permitted by applicable law, we and our affiliates will not be liable
+      for any indirect, incidental, special, consequential, or punitive damages, or for loss of
+      profits, data, goodwill, or business opportunities, arising from your use of the Service.
+    </p>
+    <p>
+      Our total aggregate liability for any claim arising out of or related to these Terms or the
+      Service shall not exceed the greater of (a) the amount you paid us for the Service in the
+      twelve months preceding the claim, or <strong>(b) zero</strong> if the Service was provided
+      without charge.
+    </p>
+    <p>
+      Nothing in these Terms excludes or limits liability that cannot be excluded or limited under
+      applicable law (including liability for death or personal injury caused by negligence, fraud,
+      or other non-waivable rights).
+    </p>
+
+    <h2>15. Indemnification</h2>
+    <p>
+      You agree to indemnify and hold harmless the operator of the Service and its personnel from
+      third-party claims, damages, losses, and reasonable legal fees arising from your User
+      Content, your breach of these Terms, or your violation of law or third-party rights.
+    </p>
+
+    <h2>16. Termination</h2>
+    <p>
+      You may stop using the Service at any time. We may suspend or terminate your access for
+      breach of these Terms, legal requirements, or operational reasons. Provisions that by their
+      nature should survive (including intellectual property, disclaimers, limitation of liability,
+      indemnity, and governing law) will survive termination.
+    </p>
+
+    <h2>17. Governing law and disputes</h2>
+    <p>
+      These Terms are governed by the <strong>laws of India</strong>, without regard to conflict
+      of law principles, subject to any mandatory consumer protections in your place of residence.
+    </p>
+    <p>
+      Subject to those mandatory rights, courts located in <strong>New Delhi, India</strong> shall
+      have exclusive jurisdiction over disputes arising from these Terms, except where consumer law
+      requires a different forum.
+    </p>
+    <p>
+      For grievances relating to the Service, contact
+      <a href="mailto:amngupta@protonmail.com">amngupta@protonmail.com</a>. We will
+      acknowledge good-faith complaints within a reasonable time and endeavour to respond within
+      thirty days where practicable.
+    </p>
+
+    <h2>18. Privacy and data</h2>
+    <p>
+      Our collection and use of personal data is described in the
+      <a href="/privacy-policy">Privacy Policy</a>, which is incorporated by reference.
+    </p>
+
+    <h2>19. General</h2>
+    <p>
+      <strong>Severability.</strong> If any provision is held invalid, the remainder remains in
+      effect.
+    </p>
+    <p>
+      <strong>No waiver.</strong> Failure to enforce a provision is not a waiver of future
+      enforcement.
+    </p>
+    <p>
+      <strong>Entire agreement.</strong> These Terms and the Privacy Policy constitute the entire
+      agreement regarding the Service and supersede prior understandings on the same subject.
+    </p>
+    <p>
+      <strong>Assignment.</strong> You may not assign these Terms without our consent. We may
+      assign them in connection with a merger, acquisition, or sale of assets.
+    </p>
+  </div>
+</body>
+</html>
