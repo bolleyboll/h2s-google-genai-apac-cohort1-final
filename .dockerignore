@@ -88,5 +88,4 @@ venv/
 # VS Code
 .vscode/
 
-# Data
-data/
+deploy.sh
