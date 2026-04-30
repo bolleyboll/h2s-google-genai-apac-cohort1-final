@@ -88,4 +88,13 @@ venv/
 # VS Code
 .vscode/
 
+# AI
+.cursor/
+.claude/
+
+# Frontend: build inside the image, never copy local artifacts.
+frontend/node_modules/
+frontend/dist/
+static/dist/
+
 deploy.sh

@@ -12,6 +12,12 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from sqlalchemy import text
 
+from sidekick.chat_access import (
+    chat_can_use,
+    deny_with_title,
+    is_admin_bypass,
+    lookup_resource_id_by_google_id,
+)
 from sidekick.db import db_connection
 from sidekick.google_credentials import load_credentials_for_google_api
 from sidekick.resource_label import (
@@ -34,6 +40,27 @@ def _owner(tool_context: ToolContext) -> str:
         str: ``user_id`` (Google OAuth ``sub`` when using the Flask proxy).
     """
     return tool_context.user_id
+
+
+def _active_chat_id(tool_context: ToolContext) -> Optional[int]:
+    """Read the active chat id from session state seeded by the proxy.
+
+    Args:
+        tool_context (ToolContext): Current tool execution context.
+
+    Returns:
+        Optional[int]: Chat primary key, or None when state has not been seeded.
+    """
+    try:
+        raw = tool_context.state.get("active_chat_id")
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _resolve_creds(owner: str) -> tuple[Optional[Credentials], Optional[str]]:
@@ -137,6 +164,7 @@ def _backup_calendar_event_to_db(
     fallback_start: str,
     fallback_end: str,
     notes: Optional[str],
+    chat_id: Optional[int],
 ) -> Optional[str]:
     """Insert a backup calendar row after a successful Google Calendar create.
 
@@ -162,9 +190,10 @@ def _backup_calendar_event_to_db(
             conn.execute(
                 text(
                     "INSERT INTO sidekick_calendar_events "
-                    "(owner_sub, title, start_at, end_at, notes, google_event_id, google_quick_link) "
+                    "(owner_sub, title, start_at, end_at, notes, google_event_id, "
+                    "google_quick_link, chat_id) "
                     "VALUES (:owner, :title, CAST(:start_at AS timestamptz), "
-                    "CAST(:end_at AS timestamptz), :notes, :gid, :link)"
+                    "CAST(:end_at AS timestamptz), :notes, :gid, :link, :cid)"
                 ),
                 {
                     "owner": owner_sub,
@@ -174,6 +203,7 @@ def _backup_calendar_event_to_db(
                     "notes": notes,
                     "gid": gid,
                     "link": link,
+                    "cid": chat_id,
                 },
             )
     except Exception as e:
@@ -240,6 +270,7 @@ def _backup_google_task_to_db(
     owner_sub: str,
     created: dict[str, Any],
     tasklist_id: str,
+    chat_id: Optional[int],
 ) -> Optional[str]:
     """Insert a backup task row after a successful Google Tasks create.
 
@@ -264,8 +295,8 @@ def _backup_google_task_to_db(
                 conn.execute(
                     text(
                         "INSERT INTO sidekick_tasks (owner_sub, title, status, due_at, "
-                        "google_task_id, google_tasklist_id, google_quick_link) "
-                        "VALUES (:owner, :title, :status, NULL, :gtid, :gtlist, :link)"
+                        "google_task_id, google_tasklist_id, google_quick_link, chat_id) "
+                        "VALUES (:owner, :title, :status, NULL, :gtid, :gtlist, :link, :cid)"
                     ),
                     {
                         "owner": owner_sub,
@@ -274,15 +305,16 @@ def _backup_google_task_to_db(
                         "gtid": gtid,
                         "gtlist": tasklist_id,
                         "link": link,
+                        "cid": chat_id,
                     },
                 )
             else:
                 conn.execute(
                     text(
                         "INSERT INTO sidekick_tasks (owner_sub, title, status, due_at, "
-                        "google_task_id, google_tasklist_id, google_quick_link) "
+                        "google_task_id, google_tasklist_id, google_quick_link, chat_id) "
                         "VALUES (:owner, :title, :status, CAST(:due_at AS timestamptz), "
-                        ":gtid, :gtlist, :link)"
+                        ":gtid, :gtlist, :link, :cid)"
                     ),
                     {
                         "owner": owner_sub,
@@ -292,6 +324,7 @@ def _backup_google_task_to_db(
                         "gtid": gtid,
                         "gtlist": tasklist_id,
                         "link": link,
+                        "cid": chat_id,
                     },
                 )
     except Exception as e:
@@ -592,6 +625,7 @@ def google_calendar_create_event(
         str: JSON with created event fields and optional ``backup_error`` fields.
     """
     owner = _owner(tool_context)
+    chat_id = _active_chat_id(tool_context)
     creds, err_json = _resolve_creds(owner)
     if err_json:
         return err_json
@@ -630,7 +664,7 @@ def google_calendar_create_event(
         "htmlLink": created.get("htmlLink"),
     }
     backup_err = _backup_calendar_event_to_db(
-        owner, created, start_at, end_at, desc_stored
+        owner, created, start_at, end_at, desc_stored, chat_id
     )
     if backup_err:
         out["backup_error"] = True
@@ -661,9 +695,19 @@ def google_calendar_update_event(
         str: JSON with updated event fields and optional ``backup_error``, or error JSON.
     """
     owner = _owner(tool_context)
+    chat_id = _active_chat_id(tool_context)
     creds, err_json = _resolve_creds(owner)
     if err_json:
         return err_json
+
+    with db_connection() as conn:
+        rid = lookup_resource_id_by_google_id(conn, "calendar_event", event_id, owner)
+        if (
+            rid is not None
+            and not is_admin_bypass(tool_context)
+            and not chat_can_use(conn, chat_id, "calendar_event", rid, owner)
+        ):
+            return deny_with_title(conn, "calendar_event", rid, owner, google_id=event_id)
 
     try:
         service = build("calendar", "v3", credentials=creds, cache_discovery=False)
@@ -764,9 +808,19 @@ def google_calendar_delete_event(event_id: str, *, tool_context: ToolContext) ->
         str: JSON confirming deletion or error JSON.
     """
     owner = _owner(tool_context)
+    chat_id = _active_chat_id(tool_context)
     creds, err_json = _resolve_creds(owner)
     if err_json:
         return err_json
+
+    with db_connection() as conn:
+        rid = lookup_resource_id_by_google_id(conn, "calendar_event", event_id, owner)
+        if (
+            rid is not None
+            and not is_admin_bypass(tool_context)
+            and not chat_can_use(conn, chat_id, "calendar_event", rid, owner)
+        ):
+            return deny_with_title(conn, "calendar_event", rid, owner, google_id=event_id)
 
     try:
         service = build("calendar", "v3", credentials=creds, cache_discovery=False)
@@ -901,6 +955,7 @@ def google_tasks_create_task(
         str: JSON with created task fields and optional ``backup_error`` fields.
     """
     owner = _owner(tool_context)
+    chat_id = _active_chat_id(tool_context)
     creds, err_json = _resolve_creds(owner)
     if err_json:
         return err_json
@@ -927,7 +982,7 @@ def google_tasks_create_task(
         "status": created.get("status"),
         "tasklist_id": tasklist_id,
     }
-    backup_err = _backup_google_task_to_db(owner, created, tasklist_id)
+    backup_err = _backup_google_task_to_db(owner, created, tasklist_id, chat_id)
     if backup_err:
         out["backup_error"] = True
         out["backup_message"] = backup_err
@@ -959,9 +1014,15 @@ def google_tasks_update_task(
         str: JSON with updated task fields and optional ``backup_error``, or error JSON.
     """
     owner = _owner(tool_context)
+    chat_id = _active_chat_id(tool_context)
     creds, err_json = _resolve_creds(owner)
     if err_json:
         return err_json
+
+    with db_connection() as conn:
+        rid = lookup_resource_id_by_google_id(conn, "task", task_id, owner)
+        if rid is not None and not is_admin_bypass(tool_context) and not chat_can_use(conn, chat_id, "task", rid, owner):
+            return deny_with_title(conn, "task", rid, owner, google_id=task_id)
 
     if status is not None and status not in ("needsAction", "completed"):
         return json.dumps(
@@ -1047,9 +1108,15 @@ def google_tasks_delete_task(
         str: JSON confirming deletion or error JSON.
     """
     owner = _owner(tool_context)
+    chat_id = _active_chat_id(tool_context)
     creds, err_json = _resolve_creds(owner)
     if err_json:
         return err_json
+
+    with db_connection() as conn:
+        rid = lookup_resource_id_by_google_id(conn, "task", task_id, owner)
+        if rid is not None and not is_admin_bypass(tool_context) and not chat_can_use(conn, chat_id, "task", rid, owner):
+            return deny_with_title(conn, "task", rid, owner, google_id=task_id)
 
     try:
         service = build("tasks", "v1", credentials=creds, cache_discovery=False)

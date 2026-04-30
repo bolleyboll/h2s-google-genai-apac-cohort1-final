@@ -13,10 +13,10 @@ from sqlalchemy import text
 from sidekick.db import db_connection
 from sidekick.google_credentials import (
     calendar_api_enabled_in_oauth,
-    keep_api_enabled_in_oauth,
+    docs_api_enabled_in_oauth,
     tasks_api_enabled_in_oauth,
 )
-from sidekick.google_keep_tools import google_keep_delete_note, google_keep_update_note
+from sidekick.google_docs_tools import google_docs_delete_note, google_docs_update_note
 from sidekick.google_product_tools import (
     google_calendar_delete_event,
     google_calendar_update_event,
@@ -31,6 +31,49 @@ ui_api_bp = Blueprint("ui_inventory", __name__, url_prefix="/ui-api")
 _INVENTORY_LIMIT = 200
 
 
+def _resolve_scope() -> Tuple[Optional[int], bool, Optional[Tuple[Any, int]]]:
+    """Read ``?chat_id=`` and ``?scope=`` query params and translate to a filter mode.
+
+    Returns:
+        Tuple[Optional[int], bool, Optional[Tuple[Any, int]]]:
+            * ``chat_id`` (int) when filtering to one chat (own resources + grants).
+            * ``central`` flag (bool): True when ``scope=all`` — show everything the user owns.
+            * Optional error tuple (``response``, ``status``) when params are malformed.
+    """
+    scope = (request.args.get("scope") or "").strip().lower()
+    chat_raw = (request.args.get("chat_id") or "").strip()
+    if scope == "all":
+        return None, True, None
+    if chat_raw:
+        try:
+            cid = int(chat_raw)
+        except ValueError:
+            return None, False, (jsonify(error="invalid_chat_id"), 400)
+        return cid, False, None
+    return None, True, None
+
+
+def _grant_clause(resource_type: str, chat_id: int, params: dict[str, Any]) -> str:
+    """Build a ``WHERE id IN (...)`` clause covering the chat's grants for a resource type.
+
+    Args:
+        resource_type (str): ``note`` / ``task`` / ``calendar_event``.
+        chat_id (int): Active chat id.
+        params (dict[str, Any]): Mutable params dict the clause's ``:cid`` / ``:rtype`` are bound to.
+
+    Returns:
+        str: ``id IN (...)`` SQL fragment safe to OR with the chat-local condition.
+    """
+    params["cid"] = chat_id
+    params["rtype"] = resource_type
+    return (
+        "id IN ("
+        " SELECT resource_id FROM sidekick_chat_resource_access "
+        " WHERE chat_id = :cid AND resource_type = :rtype"
+        ")"
+    )
+
+
 def _oauth_configured() -> bool:
     """Return whether Google OAuth client credentials are configured for this process.
 
@@ -43,15 +86,22 @@ def _oauth_configured() -> bool:
 
 
 def _tool_context(owner_sub: str) -> SimpleNamespace:
-    """Build a minimal ADK-like context object for calling Google API tool functions.
+    """Build an ADK-like context for direct UI invocations of agent tool functions.
+
+    The ``state`` dict carries ``_sidekick_admin_bypass`` so chat-scope checks
+    inside the tools (which exist to constrain the LLM, not the UI) are skipped
+    — the user is acting through the authoritative UI on a resource they own.
 
     Args:
         owner_sub (str): Google subject id (``sub``) or placeholder when OAuth is off.
 
     Returns:
-        SimpleNamespace: Object with ``user_id`` set to ``owner_sub``.
+        SimpleNamespace: Object with ``user_id`` and a ``state`` dict.
     """
-    return SimpleNamespace(user_id=owner_sub)
+    return SimpleNamespace(
+        user_id=owner_sub,
+        state={"_sidekick_admin_bypass": True},
+    )
 
 
 def _require_owner() -> Tuple[Optional[str], Optional[Tuple[Any, int]]]:
@@ -119,25 +169,44 @@ def _json_response_from_tool(raw: str) -> Tuple[Any, int]:
 
 @ui_api_bp.get("/inventory/tasks")
 def inventory_tasks():
-    """List task rows for the signed-in user with Google Tasks API enablement flag.
+    """List task rows for the signed-in user with chat-scoped or central filtering.
+
+    Query params:
+        chat_id (int, optional): Restrict to rows local to the chat plus its grants.
+        scope (str, optional): ``all`` returns everything the user owns (default).
 
     Returns:
-        Response: JSON with ``google_api_enabled`` and ``items`` (HTTP 200), or error JSON.
+        Response: JSON with ``google_api_enabled``, ``items``, ``mode``.
     """
     owner, err = _require_owner()
     if err:
         return err[0], err[1]
     assert owner is not None
+    chat_id, central, scope_err = _resolve_scope()
+    if scope_err:
+        return scope_err[0], scope_err[1]
+    base_cols = (
+        "id, title, status, due_at, created_at, google_task_id, "
+        "google_tasklist_id, google_quick_link, chat_id"
+    )
+    params: dict[str, Any] = {"owner": owner, "lim": _INVENTORY_LIMIT}
     try:
         with db_connection() as conn:
-            r = conn.execute(
-                text(
-                    "SELECT id, title, status, due_at, created_at, google_task_id, "
-                    "google_tasklist_id, google_quick_link FROM sidekick_tasks WHERE owner_sub = :owner "
+            if central:
+                sql = (
+                    f"SELECT {base_cols} FROM sidekick_tasks WHERE owner_sub = :owner "
                     "ORDER BY created_at DESC LIMIT :lim"
-                ),
-                {"owner": owner, "lim": _INVENTORY_LIMIT},
-            )
+                )
+            else:
+                assert chat_id is not None
+                grant = _grant_clause("task", chat_id, params)
+                sql = (
+                    f"SELECT {base_cols} FROM sidekick_tasks "
+                    "WHERE owner_sub = :owner "
+                    "  AND (chat_id = :cid OR " + grant + ") "
+                    "ORDER BY created_at DESC LIMIT :lim"
+                )
+            r = conn.execute(text(sql), params)
             items = [_row_to_dict(row) for row in r]
     except Exception as e:
         return jsonify(error="database", message=str(e)), 500
@@ -146,6 +215,8 @@ def inventory_tasks():
     payload = {
         "google_api_enabled": tasks_api_enabled_in_oauth(),
         "items": items,
+        "mode": "all" if central else "chat",
+        "chat_id": chat_id,
     }
     return Response(
         json.dumps(payload, default=str),
@@ -155,31 +226,49 @@ def inventory_tasks():
 
 @ui_api_bp.get("/inventory/calendar")
 def inventory_calendar():
-    """List calendar event rows for the signed-in user with Calendar API enablement flag.
+    """List calendar event rows for the signed-in user with chat-scoped or central filtering.
 
     Returns:
-        Response: JSON with ``google_api_enabled`` and ``items`` (HTTP 200), or error JSON.
+        Response: JSON with ``google_api_enabled``, ``items``, ``mode``.
     """
     owner, err = _require_owner()
     if err:
         return err[0], err[1]
     assert owner is not None
+    chat_id, central, scope_err = _resolve_scope()
+    if scope_err:
+        return scope_err[0], scope_err[1]
+    base_cols = (
+        "id, title, start_at, end_at, notes, created_at, google_event_id, "
+        "google_quick_link, chat_id"
+    )
+    params: dict[str, Any] = {"owner": owner, "lim": _INVENTORY_LIMIT}
     try:
         with db_connection() as conn:
-            r = conn.execute(
-                text(
-                    "SELECT id, title, start_at, end_at, notes, created_at, google_event_id "
-                    ", google_quick_link FROM sidekick_calendar_events WHERE owner_sub = :owner "
+            if central:
+                sql = (
+                    f"SELECT {base_cols} FROM sidekick_calendar_events "
+                    "WHERE owner_sub = :owner "
                     "ORDER BY start_at DESC LIMIT :lim"
-                ),
-                {"owner": owner, "lim": _INVENTORY_LIMIT},
-            )
+                )
+            else:
+                assert chat_id is not None
+                grant = _grant_clause("calendar_event", chat_id, params)
+                sql = (
+                    f"SELECT {base_cols} FROM sidekick_calendar_events "
+                    "WHERE owner_sub = :owner "
+                    "  AND (chat_id = :cid OR " + grant + ") "
+                    "ORDER BY start_at DESC LIMIT :lim"
+                )
+            r = conn.execute(text(sql), params)
             items = [_row_to_dict(row) for row in r]
     except Exception as e:
         return jsonify(error="database", message=str(e)), 500
     payload = {
         "google_api_enabled": calendar_api_enabled_in_oauth(),
         "items": items,
+        "mode": "all" if central else "chat",
+        "chat_id": chat_id,
     }
     return Response(
         json.dumps(payload, default=str),
@@ -189,31 +278,48 @@ def inventory_calendar():
 
 @ui_api_bp.get("/inventory/notes")
 def inventory_notes():
-    """List note rows for the signed-in user with Keep API enablement flag.
+    """List note rows for the signed-in user with chat-scoped or central filtering.
 
     Returns:
-        Response: JSON with ``google_api_enabled`` and ``items`` (HTTP 200), or error JSON.
+        Response: JSON with ``google_api_enabled``, ``items``, ``mode``.
     """
     owner, err = _require_owner()
     if err:
         return err[0], err[1]
     assert owner is not None
+    chat_id, central, scope_err = _resolve_scope()
+    if scope_err:
+        return scope_err[0], scope_err[1]
+    base_cols = (
+        "id, title, body, created_at, google_doc_id, google_quick_link, chat_id"
+    )
+    params: dict[str, Any] = {"owner": owner, "lim": _INVENTORY_LIMIT}
     try:
         with db_connection() as conn:
-            r = conn.execute(
-                text(
-                    "SELECT id, title, body, created_at, google_keep_note_name, google_quick_link "
-                    "FROM sidekick_notes WHERE owner_sub = :owner "
+            if central:
+                sql = (
+                    f"SELECT {base_cols} FROM sidekick_notes "
+                    "WHERE owner_sub = :owner "
                     "ORDER BY created_at DESC LIMIT :lim"
-                ),
-                {"owner": owner, "lim": _INVENTORY_LIMIT},
-            )
+                )
+            else:
+                assert chat_id is not None
+                grant = _grant_clause("note", chat_id, params)
+                sql = (
+                    f"SELECT {base_cols} FROM sidekick_notes "
+                    "WHERE owner_sub = :owner "
+                    "  AND (chat_id = :cid OR " + grant + ") "
+                    "ORDER BY created_at DESC LIMIT :lim"
+                )
+            r = conn.execute(text(sql), params)
             items = [_row_to_dict(row) for row in r]
     except Exception as e:
         return jsonify(error="database", message=str(e)), 500
     payload = {
-        "google_api_enabled": keep_api_enabled_in_oauth(),
+        "google_api_enabled": docs_api_enabled_in_oauth(),
         "items": items,
+        "mode": "all" if central else "chat",
+        "chat_id": chat_id,
     }
     return Response(
         json.dumps(payload, default=str),
@@ -323,12 +429,12 @@ def delete_google_calendar(event_id: str):
     return _json_response_from_tool(raw)
 
 
-@ui_api_bp.patch("/google/notes/<path:note_name>")
-def patch_google_note(note_name: str):
-    """Update a Keep note via ``google_keep_update_note`` when Keep API is enabled.
+@ui_api_bp.patch("/google/notes/<string:doc_id>")
+def patch_google_note(doc_id: str):
+    """Update a Google Doc note via ``google_docs_update_note`` when Docs API is enabled.
 
     Args:
-        note_name (str): Keep API resource name (for example ``notes/...``).
+        doc_id (str): Google Docs document id.
 
     Returns:
         Tuple[Any, int]: JSON response and status from ``_json_response_from_tool``.
@@ -336,11 +442,11 @@ def patch_google_note(note_name: str):
     owner, err = _require_owner()
     if err:
         return err[0], err[1]
-    if not keep_api_enabled_in_oauth():
-        return jsonify(error="google_keep_disabled"), 400
+    if not docs_api_enabled_in_oauth():
+        return jsonify(error="google_docs_disabled"), 400
     body = _json_body()
-    raw = google_keep_update_note(
-        note_name=note_name,
+    raw = google_docs_update_note(
+        doc_id=doc_id,
         title=body.get("title"),
         body=body.get("body"),
         tool_context=_tool_context(owner),
@@ -348,12 +454,12 @@ def patch_google_note(note_name: str):
     return _json_response_from_tool(raw)
 
 
-@ui_api_bp.delete("/google/notes/<path:note_name>")
-def delete_google_note(note_name: str):
-    """Delete a Keep note via ``google_keep_delete_note`` when Keep API is enabled.
+@ui_api_bp.delete("/google/notes/<string:doc_id>")
+def delete_google_note(doc_id: str):
+    """Delete a Google Doc note via ``google_docs_delete_note`` when Docs API is enabled.
 
     Args:
-        note_name (str): Keep API resource name (for example ``notes/...``).
+        doc_id (str): Google Docs document id.
 
     Returns:
         Tuple[Any, int]: JSON response and status from ``_json_response_from_tool``.
@@ -361,9 +467,9 @@ def delete_google_note(note_name: str):
     owner, err = _require_owner()
     if err:
         return err[0], err[1]
-    if not keep_api_enabled_in_oauth():
-        return jsonify(error="google_keep_disabled"), 400
-    raw = google_keep_delete_note(note_name, tool_context=_tool_context(owner))
+    if not docs_api_enabled_in_oauth():
+        return jsonify(error="google_docs_disabled"), 400
+    raw = google_docs_delete_note(doc_id, tool_context=_tool_context(owner))
     return _json_response_from_tool(raw)
 
 
@@ -542,7 +648,7 @@ def delete_db_calendar(event_id: int):
 
 @ui_api_bp.patch("/db/notes/<int:note_id>")
 def patch_db_note(note_id: int):
-    """Patch a ``sidekick_notes`` row when Google Keep API is disabled.
+    """Patch a ``sidekick_notes`` row when Google Docs API is disabled.
 
     Args:
         note_id (int): Primary key of the note row.
@@ -553,7 +659,7 @@ def patch_db_note(note_id: int):
     owner, err = _require_owner()
     if err:
         return err[0], err[1]
-    if keep_api_enabled_in_oauth():
+    if docs_api_enabled_in_oauth():
         return jsonify(error="use_google_note_endpoint"), 400
     body = _json_body()
     if "title" not in body and "body" not in body:
@@ -571,7 +677,7 @@ def patch_db_note(note_id: int):
         "UPDATE sidekick_notes SET "
         + ", ".join(sets)
         + " WHERE id = :id AND owner_sub = :owner "
-        "RETURNING id, title, body, created_at, google_keep_note_name, google_quick_link"
+        "RETURNING id, title, body, created_at, google_doc_id, google_quick_link"
     )
     try:
         with db_connection() as conn:
@@ -589,7 +695,7 @@ def patch_db_note(note_id: int):
 
 @ui_api_bp.delete("/db/notes/<int:note_id>")
 def delete_db_note(note_id: int):
-    """Delete a ``sidekick_notes`` row when Google Keep API is disabled.
+    """Delete a ``sidekick_notes`` row when Google Docs API is disabled.
 
     Args:
         note_id (int): Primary key of the note row.
@@ -600,7 +706,7 @@ def delete_db_note(note_id: int):
     owner, err = _require_owner()
     if err:
         return err[0], err[1]
-    if keep_api_enabled_in_oauth():
+    if docs_api_enabled_in_oauth():
         return jsonify(error="use_google_note_endpoint"), 400
     try:
         with db_connection() as conn:

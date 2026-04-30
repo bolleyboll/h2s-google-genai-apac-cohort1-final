@@ -21,8 +21,8 @@ from sidekick.db import db_connection
 
 logger = logging.getLogger(__name__)
 
-# OAuth scopes: sign-in + optional Calendar / Tasks / Keep (see SIDEKICK_ENABLE_GOOGLE_*).
-# ``calendar.events``, ``tasks``, and ``keep`` are read/write scopes and cover create/update/delete
+# OAuth scopes: sign-in + optional Calendar / Tasks / Docs (see SIDEKICK_ENABLE_GOOGLE_*).
+# ``calendar.events``, ``tasks``, ``documents``, and ``drive.file`` cover create/update/delete
 # for Sidekick tools (no extra scope needed for patch or delete).
 
 
@@ -57,13 +57,13 @@ def tasks_api_enabled_in_oauth() -> bool:
     return _env_api_enabled("SIDEKICK_ENABLE_GOOGLE_TASKS")
 
 
-def keep_api_enabled_in_oauth() -> bool:
-    """Return whether Google Keep API scopes should be requested.
+def docs_api_enabled_in_oauth() -> bool:
+    """Return whether Google Docs/Drive API scopes should be requested.
 
     Returns:
-        bool: True unless ``SIDEKICK_ENABLE_GOOGLE_KEEP`` disables Keep.
+        bool: True unless ``SIDEKICK_ENABLE_GOOGLE_DOCS`` disables Docs.
     """
-    return _env_api_enabled("SIDEKICK_ENABLE_GOOGLE_KEEP")
+    return _env_api_enabled("SIDEKICK_ENABLE_GOOGLE_DOCS")
 
 
 def sidekick_google_oauth_scope() -> str:
@@ -81,8 +81,9 @@ def sidekick_google_oauth_scope() -> str:
         parts.append("https://www.googleapis.com/auth/calendar.events")
     if tasks_api_enabled_in_oauth():
         parts.append("https://www.googleapis.com/auth/tasks")
-    if keep_api_enabled_in_oauth():
-        parts.append("https://www.googleapis.com/auth/keep")
+    if docs_api_enabled_in_oauth():
+        parts.append("https://www.googleapis.com/auth/documents")
+        parts.append("https://www.googleapis.com/auth/drive.file")
     return " ".join(parts)
 
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
@@ -347,8 +348,8 @@ def google_api_auth_error_message() -> str:
         bits.append("Enable Calendar API and calendar.events scope when Calendar integration is on.")
     if tasks_api_enabled_in_oauth():
         bits.append("Enable Tasks API and tasks scope when Tasks integration is on.")
-    if keep_api_enabled_in_oauth():
+    if docs_api_enabled_in_oauth():
         bits.append(
-            "Enable Keep API and .../auth/keep when Keep is on (often Workspace-only)."
+            "Enable Docs API (.../auth/documents) and Drive (.../auth/drive.file) when Docs integration is on."
         )
     return " ".join(bits)

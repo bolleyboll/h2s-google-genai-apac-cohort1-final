@@ -14,6 +14,7 @@ import re
 import threading
 import time
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 import httpx
@@ -27,7 +28,18 @@ import sidekick._google_auth_patch  # noqa: F401 — before google.adk / google.
 
 from google.adk.cli.fast_api import get_fast_api_app
 
+from sidekick.chat_history import (
+    fetch_recent_decrypted_history,
+    history_as_adk_events,
+)
+from sidekick.chat_naming import maybe_autoname_chat
+from sidekick.crypto import assert_encryption_ready
+from sidekick.db import db_connection, get_chat
+from sidekick.flask_chats_api import append_chat_message, ui_chats_bp
 from sidekick.flask_inventory_api import ui_api_bp
+from sidekick.flask_speech_api import ui_speech_bp
+from sidekick.memory import top_relevant_memories
+from sidekick.run_telemetry import persist_run_telemetry
 from sidekick.google_credentials import (
     persist_oauth_token_from_authlib,
     sidekick_google_oauth_scope,
@@ -35,6 +47,9 @@ from sidekick.google_credentials import (
 
 REPO_ROOT = Path(__file__).resolve().parent
 STATIC_DIR = REPO_ROOT / "static"
+# Vite builds the SPA to ``static/dist/`` so the production payload is one HTML
+# + one JS bundle + one CSS bundle. Legal pages still live next to ``static/``.
+SPA_INDEX = STATIC_DIR / "dist" / "index.html"
 
 logger = logging.getLogger("sidekick.proxy")
 
@@ -42,6 +57,12 @@ _GOOGLE_DISCOVERY = "https://accounts.google.com/.well-known/openid-configuratio
 _USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 
 _users_path_re = re.compile(r"(apps/[^/]+/users/)[^/]+")
+
+# Per-process cache of ADK session_ids the proxy has already verified or
+# seeded. ADK sessions live in-memory, so this cache is correct for one process
+# lifetime: after a restart the cache empties, the GET below 404s, and we
+# re-seed from the encrypted log.
+_seeded_chat_sessions: set[str] = set()
 
 
 def _oauth_configured() -> bool:
@@ -92,13 +113,53 @@ def _rewrite_adk_path(path: str, uid: str) -> str:
     return _users_path_re.sub(r"\1" + safe, path)
 
 
-def _rewrite_run_body(body: bytes, uid: str, path: str) -> bytes:
-    """Inject ``user_id`` into ADK run request JSON for the authenticated user.
+_MEMORY_PREAMBLE_HEADER = "[CONTEXT — Memories about this user, ranked by relevance:"
+_MEMORY_PREAMBLE_FOOTER = (
+    "End of memories. Use them as background; don't quote ids back. "
+    "User message follows.]"
+)
+
+
+def _format_memory_preamble(memories: list[dict[str, Any]]) -> str:
+    """Render a compact preamble from the top relevant memories.
+
+    Args:
+        memories (list[dict[str, Any]]): Output of :func:`top_relevant_memories`.
+
+    Returns:
+        str: Multi-line block ready to prepend to ``new_message`` text. Empty when
+        there are no memories — callers should branch on truthiness.
+    """
+    if not memories:
+        return ""
+    lines = [_MEMORY_PREAMBLE_HEADER]
+    for m in memories:
+        text_value = (m.get("text") or "").strip().replace("\n", " ")
+        if not text_value:
+            continue
+        # Keep entries terse so we don't burn tokens; trim to 240 chars.
+        if len(text_value) > 240:
+            text_value = text_value[:237].rstrip() + "…"
+        lines.append(f"- {text_value} (relevance {m.get('score', 0):.2f})")
+    lines.append(_MEMORY_PREAMBLE_FOOTER)
+    return "\n".join(lines) + "\n\n"
+
+
+def _rewrite_run_body(
+    body: bytes, uid: str, path: str, chat_id: int | None
+) -> bytes:
+    """Inject ``user_id``, ``state_delta.active_chat_id``, and a memory preamble.
+
+    The memory preamble runs the user's incoming message through the embedding
+    model, fetches the top-K relevant stored memories for ``uid``, and prepends
+    them as a labelled context block on ``new_message.parts[0].text``. The
+    agent's instruction tells it to treat that block as background.
 
     Args:
         body (bytes): Raw request body.
         uid (str): Google ``sub`` to set as ``user_id``.
         path (str): ADK path segment (only ``run`` / ``run_sse`` are rewritten).
+        chat_id (int | None): Active chat id to seed into session state, or None.
 
     Returns:
         bytes: Possibly modified body; unchanged if not JSON or wrong path.
@@ -112,10 +173,257 @@ def _rewrite_run_body(body: bytes, uid: str, path: str) -> bytes:
         data = json.loads(body.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
         return body
-    if isinstance(data, dict):
-        data["user_id"] = uid
-        return json.dumps(data, separators=(",", ":")).encode("utf-8")
-    return body
+    if not isinstance(data, dict):
+        return body
+    data["user_id"] = uid
+    if chat_id is not None:
+        sd = data.get("state_delta")
+        if not isinstance(sd, dict):
+            sd = {}
+        sd["active_chat_id"] = int(chat_id)
+        data["state_delta"] = sd
+
+    # ---- Memory preamble injection -----------------------------------------
+    # We only do the embed lookup once we have plaintext for the new turn;
+    # everything is best-effort and silently no-ops on failure.
+    user_text = _extract_user_text_from_run_body(body)
+    if user_text and uid:
+        try:
+            memories = top_relevant_memories(uid, user_text, k=4, min_score=0.55)
+        except Exception:
+            logger.exception("memory injection skipped")
+            memories = []
+        if memories:
+            preamble = _format_memory_preamble(memories)
+            msg = data.get("new_message")
+            if isinstance(msg, dict):
+                parts = msg.get("parts")
+                if isinstance(parts, list):
+                    seeded = False
+                    for p in parts:
+                        if isinstance(p, dict) and isinstance(p.get("text"), str):
+                            p["text"] = preamble + p["text"]
+                            seeded = True
+                            break
+                    if not seeded:
+                        parts.insert(0, {"text": preamble})
+    return json.dumps(data, separators=(",", ":")).encode("utf-8")
+
+
+def _peek_run_request(body: bytes) -> dict[str, Any]:
+    """Parse just enough of an ADK ``/run`` request body to learn its routing fields.
+
+    Args:
+        body (bytes): Raw request body.
+
+    Returns:
+        dict[str, Any]: ``{"session_id", "app_name"}`` (each may be empty), with
+        any other JSON keys passed through. Returns an empty dict on parse error.
+    """
+    if not body:
+        return {}
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _extract_user_text_from_run_body(body: bytes) -> str:
+    """Pull plain-text content out of an ADK ``/run`` request body's ``new_message``.
+
+    Args:
+        body (bytes): JSON body sent to ``/api/run``.
+
+    Returns:
+        str: Concatenated text from ``new_message.parts[*].text``, empty when none.
+    """
+    if not body:
+        return ""
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    msg = data.get("new_message") or {}
+    parts = msg.get("parts") or []
+    out: list[str] = []
+    for p in parts:
+        if isinstance(p, dict):
+            t = p.get("text")
+            if isinstance(t, str) and t:
+                out.append(t)
+    return "\n".join(out).strip()
+
+
+def _extract_assistant_text_from_events(raw: bytes) -> str:
+    """Pull assistant-text content out of an ADK ``/run`` JSON events response.
+
+    Args:
+        raw (bytes): Response body from ADK ``/run``.
+
+    Returns:
+        str: Concatenated assistant text, or empty when nothing found / not JSON.
+    """
+    if not raw:
+        return ""
+    try:
+        events = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return ""
+    if not isinstance(events, list):
+        return ""
+    pieces: list[str] = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("author") == "user":
+            continue
+        content = ev.get("content") or {}
+        for p in content.get("parts") or []:
+            if isinstance(p, dict):
+                t = p.get("text")
+                if isinstance(t, str) and t:
+                    pieces.append(t)
+    return "\n".join(pieces).strip()
+
+
+def _decode_request_payload(body: bytes) -> dict[str, Any]:
+    if not body:
+        return {}
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _resolve_active_chat_id(uid: str | None) -> int | None:
+    """Read ``X-Sidekick-Chat-Id`` and confirm ownership; return the chat id or None.
+
+    Args:
+        uid (str | None): Authenticated user sub (None when OAuth disabled).
+
+    Returns:
+        int | None: Validated chat id, or None when missing / unauthorized.
+    """
+    raw = request.headers.get("X-Sidekick-Chat-Id", "").strip()
+    if not raw:
+        return None
+    try:
+        cid = int(raw)
+    except ValueError:
+        return None
+    owner = uid or "web-ui"
+    try:
+        with db_connection() as conn:
+            chat = get_chat(conn, cid, owner)
+    except Exception:
+        logger.exception("Failed to resolve chat id %s for user %s", cid, owner)
+        return None
+    return cid if chat is not None else None
+
+
+def _ensure_adk_session_seeded(
+    adk_base: str,
+    app_name: str,
+    user_id: str,
+    session_id: str,
+    chat_id: int,
+) -> None:
+    """Make sure the ADK session for this chat has prior turns loaded.
+
+    Cheap fast-path: if the proxy already saw this session in the current
+    process, do nothing. Otherwise GET the session from ADK; on 404, fetch the
+    decrypted history from ``sidekick_chat_messages`` and POST a fresh session
+    populated with those events plus the chat's ``active_chat_id`` state.
+
+    Best-effort throughout — failures fall back to ADK's ``auto_create_session``
+    on the subsequent ``/run`` (i.e. the agent loses memory but the request still
+    succeeds).
+
+    Args:
+        adk_base (str): Internal ADK base URL (e.g. ``http://127.0.0.1:8001``).
+        app_name (str): ADK app name (always ``sidekick`` here).
+        user_id (str): Authenticated user sub.
+        session_id (str): Chat's ``agent_session_id``.
+        chat_id (int): Chat primary key.
+
+    Returns:
+        None
+    """
+    if not session_id or session_id in _seeded_chat_sessions:
+        return
+    safe_user = quote(user_id, safe="")
+    safe_session = quote(session_id, safe="")
+    base_path = f"/apps/{app_name}/users/{safe_user}/sessions"
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            r = client.get(f"{adk_base}{base_path}/{safe_session}")
+            if r.status_code == 200:
+                _seeded_chat_sessions.add(session_id)
+                return
+            if r.status_code != 404:
+                logger.warning(
+                    "ADK session probe %s -> HTTP %s; skipping seed",
+                    session_id, r.status_code,
+                )
+                return
+            history = fetch_recent_decrypted_history(chat_id)
+            payload: dict[str, Any] = {
+                "session_id": session_id,
+                "state": {"active_chat_id": int(chat_id)},
+            }
+            if history:
+                payload["events"] = history_as_adk_events(history)
+            create = client.post(f"{adk_base}{base_path}", json=payload)
+            if create.status_code >= 400:
+                logger.warning(
+                    "ADK session create %s -> HTTP %s body=%s",
+                    session_id, create.status_code, create.text[:200],
+                )
+                return
+            _seeded_chat_sessions.add(session_id)
+            if history:
+                logger.info(
+                    "Seeded ADK session %s with %d prior turns",
+                    session_id, len(history),
+                )
+    except httpx.HTTPError:
+        logger.exception("ADK session seed failed for %s", session_id)
+
+
+def _persist_chat_turn(
+    chat_id: int, user_text: str, assistant_text: str
+) -> None:
+    """Append the user message and assistant reply for one ``/run`` turn (encrypted).
+
+    Best-effort: never raises into the request handler.
+
+    Args:
+        chat_id (int): Active chat id.
+        user_text (str): Plaintext user message.
+        assistant_text (str): Plaintext assistant final reply.
+
+    Returns:
+        None
+    """
+    try:
+        with db_connection() as conn:
+            if user_text:
+                append_chat_message(conn, chat_id, "user", user_text)
+            if assistant_text:
+                append_chat_message(conn, chat_id, "assistant", assistant_text)
+    except Exception:
+        logger.exception(
+            "Failed to persist encrypted chat messages for chat_id=%s", chat_id
+        )
+    # Auto-name on the first turn — runs only when the chat is still untitled.
+    try:
+        maybe_autoname_chat(chat_id, user_text, assistant_text)
+    except Exception:
+        logger.exception("Auto-naming failed for chat_id=%s", chat_id)
 
 
 def _email_allowed(email: str) -> bool:
@@ -357,23 +665,42 @@ def main() -> None:
             )
         return None
 
+    assert_encryption_ready()
+
     flask_app.register_blueprint(ui_api_bp)
+    flask_app.register_blueprint(ui_chats_bp)
+    flask_app.register_blueprint(ui_speech_bp)
 
     @flask_app.get("/favicon.ico")
     def favicon_ico():
         return redirect("/static/favicon.svg", code=302)
 
+    def _send_spa_index() -> Response:
+        if not SPA_INDEX.is_file():
+            return Response(
+                "Frontend bundle is missing. Run `npm install && npm run build` "
+                "in the `frontend/` directory (or rebuild the Docker image), "
+                "then reload.",
+                status=503,
+                mimetype="text/plain",
+            )
+        return send_from_directory(SPA_INDEX.parent, SPA_INDEX.name)
+
     @flask_app.get("/")
     def index() -> Response:
-        return send_from_directory(flask_app.static_folder, "index.html")
+        return _send_spa_index()
 
     @flask_app.get("/ui")
     def ui_alias() -> Response:
-        return send_from_directory(flask_app.static_folder, "index.html")
+        return _send_spa_index()
 
+    # Legal pages: same URLs, but the content now lives in the Vue SPA. Hand
+    # the bundle to the browser and let the client read window.location.pathname
+    # to render the right view (so the chrome stays consistent with the rest
+    # of the app and post-login users get the in-app links).
     @flask_app.get("/privacy-policy")
     def privacy_policy() -> Response:
-        return send_from_directory(flask_app.static_folder, "privacy-policy.html")
+        return _send_spa_index()
 
     @flask_app.get("/privacy")
     def privacy_legacy_redirect():
@@ -381,7 +708,7 @@ def main() -> None:
 
     @flask_app.get("/terms-and-conditions")
     def terms_and_conditions() -> Response:
-        return send_from_directory(flask_app.static_folder, "terms-and-conditions.html")
+        return _send_spa_index()
 
     # Drop Content-Length: body may be rewritten (_rewrite_run_body); forwarding
     # the client's length causes h11 "Too much data for declared Content-Length".
@@ -428,9 +755,23 @@ def main() -> None:
             if k.lower() not in hop_by_hop
         }
         body = request.get_data()
+        request_payload = _decode_request_payload(body) if body else {}
+        chat_id = _resolve_active_chat_id(uid) if path in ("run", "run_sse") else None
+        original_user_text = (
+            _extract_user_text_from_run_body(body) if chat_id is not None else ""
+        )
+        if chat_id is not None and path in ("run", "run_sse") and uid:
+            run_meta = _peek_run_request(body)
+            session_id = run_meta.get("session_id") or ""
+            app_name = run_meta.get("app_name") or "sidekick"
+            if session_id:
+                _ensure_adk_session_seeded(
+                    adk_base, app_name, uid, session_id, chat_id
+                )
         if uid:
-            body = _rewrite_run_body(body, uid, path)
+            body = _rewrite_run_body(body, uid, path, chat_id)
         timeout = float(os.environ.get("ADK_PROXY_TIMEOUT", "300"))
+        started = time.monotonic()
         with httpx.Client(timeout=timeout) as client:
             upstream = client.request(
                 request.method,
@@ -438,6 +779,7 @@ def main() -> None:
                 headers=headers,
                 content=body if body else None,
             )
+        duration_ms = int((time.monotonic() - started) * 1000)
         if upstream.status_code >= 400:
             logger.warning(
                 "ADK proxy %s /api/%s -> HTTP %s (upstream URL %s)",
@@ -451,6 +793,26 @@ def main() -> None:
             for k, v in upstream.headers.items()
             if k.lower() not in ("content-encoding", "transfer-encoding", "connection")
         ]
+        if (
+            chat_id is not None
+            and path == "run"
+            and 200 <= upstream.status_code < 300
+        ):
+            assistant_text = _extract_assistant_text_from_events(upstream.content)
+            _persist_chat_turn(chat_id, original_user_text, assistant_text)
+            persist_run_telemetry(
+                chat_id=chat_id,
+                session_id=str(request_payload.get("session_id") or ""),
+                run_path=path,
+                request_payload=request_payload,
+                response_payload={},
+                raw_events=upstream.content,
+                content_type=upstream.headers.get("content-type", ""),
+                assistant_text=assistant_text,
+                user_text=original_user_text,
+                status_code=upstream.status_code,
+                duration_ms=duration_ms,
+            )
         return Response(
             upstream.content,
             status=upstream.status_code,

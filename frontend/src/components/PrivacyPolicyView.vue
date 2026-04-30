@@ -1,0 +1,139 @@
+<script setup>
+import LegalPage from './LegalPage.vue';
+</script>
+
+<template>
+  <div class="legal-page-host">
+    <LegalPage
+      title="Privacy policy"
+      updated="April 8, 2026"
+      other-path="/terms-and-conditions"
+      other-label="Terms of Service"
+    >
+      <h2>1. Introduction</h2>
+      <p>
+        This privacy policy describes how <strong>Sidekick</strong> (the service operated at
+        <strong>sidekick.amngupta.com</strong> and related deployments) collects, uses, stores, and
+        shares information when you use our application. We are committed to protecting your privacy
+        and handling data responsibly.
+      </p>
+
+      <h2>2. Information we collect</h2>
+
+      <h3>A. Account and authentication</h3>
+      <p>
+        If you sign in with Google, we receive identifiers and profile information from Google’s
+        OpenID Connect service, such as your Google subject ID (<code>sub</code>), email address,
+        and name where provided. We use this to identify your session and scope data to your account.
+      </p>
+
+      <h3>B. OAuth tokens</h3>
+      <p>
+        To access Google services you authorize (for example Calendar, Tasks, and optionally Keep),
+        we store OAuth tokens (including refresh tokens where issued) in our database so the service
+        can act on your behalf until you revoke access or sign out. You can revoke the app’s access
+        in your <a href="https://myaccount.google.com/permissions">Google Account permissions</a>.
+      </p>
+
+      <h3>C. Content you provide</h3>
+      <p>
+        We process messages you send to the assistant, including text you type in the chat. We also
+        store tasks, schedule entries, and notes you create through the app in our database
+        (for example PostgreSQL or AlloyDB), associated with your account identifier.
+      </p>
+
+      <h3>D. Google product data</h3>
+      <p>
+        When you use features that integrate with Google Calendar, Google Tasks, or Google Keep,
+        we read and write data in those products according to the permissions you grant. That data
+        is processed to fulfill your requests (for example listing or creating items).
+      </p>
+
+      <h3>E. Technical and usage data</h3>
+      <p>
+        Like most web services, our hosting infrastructure may log technical data such as IP
+        addresses, request paths, timestamps, and error information for security, reliability, and
+        debugging. Analytics or monitoring tools configured for the deployment may also process
+        similar metadata.
+      </p>
+
+      <h2>3. How we use your information</h2>
+      <ul>
+        <li>To provide, operate, and maintain the Sidekick service and its AI-assisted features.</li>
+        <li>To authenticate you, enforce access control, and associate stored data with your account.</li>
+        <li>To call Google APIs you have authorized, in line with the scopes shown at sign-in.</li>
+        <li>To improve reliability and fix issues (for example using logs and error reports).</li>
+        <li>To comply with law or protect rights and safety where required.</li>
+      </ul>
+
+      <h2>4. Artificial intelligence and model providers</h2>
+      <p>
+        Conversations and tool use may be sent to <strong>Google generative AI services</strong>
+        (for example Gemini via Vertex AI or related Google AI infrastructure) to generate
+        responses. Those providers process prompts and context under their terms and, where
+        applicable, your Google Cloud configuration. Do not submit secrets or highly sensitive
+        personal data in chat if you are uncomfortable with that processing.
+      </p>
+
+      <h2>5. Sharing your information</h2>
+      <h3>A. Service providers</h3>
+      <p>
+        We rely on third parties to run the service, including <strong>Google</strong> (sign-in,
+        Google APIs, AI, and cloud infrastructure such as Cloud Run, AlloyDB, or Vertex AI as
+        configured). Those providers process data as necessary to deliver their services.
+      </p>
+      <h3>B. Legal requirements</h3>
+      <p>
+        We may disclose information if required by law or in response to valid requests by public
+        authorities (for example a court or government agency).
+      </p>
+      <h3>C. Business transfers</h3>
+      <p>
+        If the service is involved in a merger, acquisition, or asset sale, your information may be
+        transferred as part of that transaction, subject to appropriate notices where required.
+      </p>
+
+      <h2>6. Data security</h2>
+      <p>
+        We implement reasonable technical and organizational measures to protect your information.
+        No method of transmission over the Internet or electronic storage is completely secure; we
+        cannot guarantee absolute security.
+      </p>
+
+      <h2>7. Data retention</h2>
+      <p>
+        We retain information only as long as needed to provide the service, comply with legal
+        obligations, resolve disputes, and enforce our agreements. You may request deletion of
+        stored account-related data where applicable (subject to legal exceptions).
+      </p>
+
+      <h2>8. Your rights</h2>
+      <p>
+        Depending on where you live, you may have rights to access, correct, delete, or restrict
+        processing of your personal data, or to object to certain processing. To exercise these
+        rights, contact us using the details below. You may also use Google’s account tools to
+        revoke app access and manage data held by Google.
+      </p>
+
+      <h2>9. Children’s privacy</h2>
+      <p>
+        The service is not directed at individuals under the age of 16. We do not knowingly collect
+        personal information from children. If you believe a child has provided us with personal
+        information, please contact us and we will take steps to delete it.
+      </p>
+
+      <h2>10. Changes to this policy</h2>
+      <p>
+        We may update this privacy policy from time to time. We will post the updated policy on this
+        page and revise the “Last updated” date. Continued use of the service after changes
+        constitutes acceptance of the updated policy where permitted by law.
+      </p>
+
+      <h2>11. Contact</h2>
+      <p>
+        For questions about this privacy policy or your data, contact the operator of Sidekick at
+        <a href="mailto:amngupta@protonmail.com">amngupta@protonmail.com</a>.
+      </p>
+    </LegalPage>
+  </div>
+</template>

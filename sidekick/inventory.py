@@ -11,10 +11,10 @@ from sqlalchemy import text
 from sidekick.db import db_connection
 from sidekick.google_credentials import (
     calendar_api_enabled_in_oauth,
-    keep_api_enabled_in_oauth,
+    docs_api_enabled_in_oauth,
     tasks_api_enabled_in_oauth,
 )
-from sidekick.google_keep_tools import google_keep_list_notes
+from sidekick.google_docs_tools import google_docs_list_notes
 from sidekick.google_product_tools import (
     google_calendar_list_events,
     google_tasks_list_tasks,
@@ -99,7 +99,7 @@ def _db_list_notes(owner_sub: str, lim: int) -> list[dict[str, Any]] | dict[str,
         with db_connection() as conn:
             r = conn.execute(
                 text(
-                    "SELECT id, title, body, created_at, google_keep_note_name "
+                    "SELECT id, title, body, created_at, google_doc_id "
                     "FROM sidekick_notes WHERE owner_sub = :owner "
                     "ORDER BY created_at DESC LIMIT :lim"
                 ),
@@ -189,9 +189,9 @@ def list_sidekick_inventory(
         sources["calendar_events"] = "database"
         out["calendar_events"] = _db_list_calendar(owner, lim)
 
-    if keep_api_enabled_in_oauth():
+    if docs_api_enabled_in_oauth():
         sources["notes"] = "google"
-        raw = google_keep_list_notes(
+        raw = google_docs_list_notes(
             max_results=lim,
             include_untagged=False,
             tool_context=tool_context,

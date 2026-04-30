@@ -2,7 +2,7 @@
 
 Submission for **Hack2Skill Google GenAI APAC Cohort 1**.
 
-Sidekick is a conversational assistant that helps you stay on top of **tasks**, **calendar-style plans**, and **notes** in one place. You chat in your browser; the assistant can organize information for you and, when you connect your Google account, work with familiar Google products while keeping a consistent backup in a database.
+Sidekick is a conversational assistant that helps you stay on top of **tasks**, **calendar-style plans**, and **notes** in one place. You chat in your browser—**type or use voice input** (after sign-in, the composer can send short recordings to **Cloud Speech-to-Text** for transcription); the assistant can organize information for you and, when you connect your Google account, work with familiar Google products while keeping a consistent backup in a database.
 
 ### Live app
 
@@ -19,7 +19,8 @@ The deployed instance is available at **[https://sidekick.amngupta.com](https://
 | **AI / ML** | **[Vertex AI](https://cloud.google.com/vertex-ai)** with **Gemini** (`GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`) for the ADK agents and for natural-language → UTC time parsing in schedule tools. |
 | **Agents** | **[Google Agent Development Kit (ADK)](https://google.github.io/adk-docs/)** — multi-agent orchestration (`LlmAgent`, tools, MCP). |
 | **Models** | **[Gemini 2.5 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash)** — 2.5 Flash is best for large scale processing, low-latency, high volume tasks that require thinking, and agentic use cases. |
-| **Identity & APIs** | **Google OAuth 2.0 / OpenID Connect** — sign-in and offline refresh tokens stored per user. Optional product APIs: **[Calendar](https://developers.google.com/calendar)**, **[Tasks](https://developers.google.com/tasks)**, **[Keep](https://developers.google.com/workspace/keep/api)** (via `google-api-python-client`). |
+| **Identity & APIs** | **Google OAuth 2.0 / OpenID Connect** — sign-in and offline refresh tokens stored per user. Optional product APIs: **[Calendar](https://developers.google.com/calendar)**, **[Tasks](https://developers.google.com/tasks)**, **[Docs](https://developers.google.com/docs/api)** + **[Drive](https://developers.google.com/drive/api)** (via `google-api-python-client`). |
+| **Speech** | **[Cloud Speech-to-Text](https://cloud.google.com/speech-to-text)** — voice dictation in the Vue chat composer: the browser records **WebM/Opus**, `POST /ui-api/speech/transcribe` forwards audio to **`SpeechClient.recognize`**, and the returned text fills the message field. Language and sample rate come from `SPEECH_LANGUAGE_CODE` and `SPEECH_SAMPLE_RATE_HERTZ` in `.env.example`. |
 | **Observability** | ADK can send **trace** / **OpenTelemetry** data to Google Cloud when `ADK_TRACE_TO_CLOUD` / `ADK_OTEL_TO_CLOUD` are enabled. |
 
 Locally or on other hosts you can still use **any PostgreSQL** (not only AlloyDB) via `DATABASE_URL`, or call Gemini with **`GOOGLE_API_KEY`** instead of Vertex when not using `GOOGLE_GENAI_USE_VERTEXAI`.
@@ -32,7 +33,8 @@ Locally or on other hosts you can still use **any PostgreSQL** (not only AlloyDB
 
 - **Tasks** — Add or list things to do. With Google Tasks enabled, items can appear in your Google Tasks list; the app can also keep its own copy for reference.
 - **Schedule** — Describe meetings or blocks of time in everyday words (“tomorrow at 3pm for an hour”). The assistant turns that into precise times and can create calendar entries when Google Calendar is connected.
-- **Notes** — Capture short notes or reference text. With Google Keep enabled, notes can live in Keep as well as in the app’s records.
+- **Notes** — Capture short notes or reference text. With Google Docs enabled, notes are stored as Google Docs (in your Drive) as well as in the app’s records.
+- **Voice input** — In the signed-in chat, use the **microphone** control to dictate: the SPA streams recorded **WebM/Opus** to **`POST /ui-api/speech/transcribe`** (`sidekick/flask_speech_api.py`), Flask calls **Google Cloud Speech-to-Text**, and the transcript is dropped into the composer so you can edit and send it like a typed message.
 
 ### How it knows it’s you
 
@@ -50,56 +52,58 @@ Items the assistant creates are tagged with a small **label** (configurable) so 
 
 ### Big picture (what talks to what)
 
-**Production (OAuth on):** visitors without a Google session only use **static, public pages** from Flask. The **assistant, AlloyDB-backed tools, and `/api`** run only **after** sign-in.
+**Production (OAuth on):** visitors without a Google session load the **same Vue SPA bundle** from Flask (`/`, `/privacy-policy`, `/terms-and-conditions` all serve `static/dist/index.html`); the client shows **public** chrome until sign-in. **`/api/*`** (ADK) and **`/ui-api/*`** (chats, inventory UI, speech) are **401** without a session when OAuth is configured.
 
 ```mermaid
 flowchart TB
-  subgraph Public["No Google sign-in — public only"]
+  subgraph Public["No Google sign-in — public routes in SPA"]
     direction TB
     V[Visitor browser]
-    V --> Home[Homepage / — header + sign-in prompt + footer]
-    V --> Priv[Privacy policy /privacy-policy]
-    V --> Tos[Terms /terms-and-conditions]
+    SPA[Vue SPA from Flask static/dist]
+    V --> SPA
+    SPA --> Home[Landing / — sign-in prompt + footer]
+    SPA --> Priv[Privacy /privacy-policy]
+    SPA --> Tos[Terms /terms-and-conditions]
   end
 
   subgraph Authenticated["After Google sign-in"]
     direction TB
     B[Signed-in browser]
     subgraph App["Sidekick app e.g. Cloud Run"]
-      Web[Flask session + OAuth + /api proxy]
+      Web[Flask session + OAuth + /api proxy + /ui-api JSON]
       Brain[ADK assistant runtime]
     end
-    subgraph AlloyDB["AlloyDB PostgreSQL — rows keyed by owner_sub"]
+    subgraph AlloyDB["AlloyDB PostgreSQL — owner_sub scoped"]
       direction TB
-      T[sidekick_tasks]
-      C[sidekick_calendar_events]
-      N[sidekick_notes]
+      T[sidekick_tasks / calendar / notes]
       O[sidekick_google_oauth]
+      Chat[sidekick_chats + messages + telemetry]
+      Mem[sidekick_memory + grants]
     end
     subgraph GoogleAPIs["Google APIs optional"]
       Tasks[Tasks]
       Cal[Calendar]
-      Keep[Keep]
+      Docs[Docs]
       Vertex[Vertex AI Gemini]
     end
     B --> Web
     Web --> Brain
+    Web --> Chat
+    Web --> Mem
     Brain --> T
-    Brain --> C
-    Brain --> N
     Brain --> O
     Brain -.-> Tasks
     Brain -.-> Cal
-    Brain -.-> Keep
+    Brain -.-> Docs
     Brain --> Vertex
   end
 
   Home -.->|Sign in with Google| Web
 ```
 
-- **Public** block: no chat form, no agent, no AlloyDB access from the browser—only **homepage shell**, **Privacy**, and **Terms** (plus theme toggle and links). `/login/google` starts OAuth; it does not by itself expose the assistant.
+- **Public** block: one **Vite-built** SPA; the server does not expose **`/api`** or **`/ui-api`** without a session. **`/login/google`** starts OAuth; the assistant and DB-backed UI APIs stay behind the session gate.
 - **Authenticated** block: same runtime as before—**`owner_sub`** scopes data per user server-side; the UI does not print user ids on individual tasks.
-- **Dashed** edges to **Tasks / Calendar / Keep**: product APIs when enabled and consented. **Vertex AI**: model + schedule parsing when configured (`.env.example`).
+- **Dashed** edges to **Tasks / Calendar / Docs**: product APIs when enabled and consented. **Vertex AI**: model + schedule parsing when configured (`.env.example`).
 
 Solid lines are core architecture for signed-in use. Dashed lines are optional Google product APIs or the transition from landing page to signed-in app.
 
@@ -110,11 +114,15 @@ flowchart TD
     A[User opens sidekick.amngupta.com] --> B{Signed in with Google?}
     B -- No --> C[Login with Google OAuth]
     C --> D[OAuth callback + user session]
-    B -- Yes --> E[Chat/UI request]
+    B -- Yes --> E[Vue SPA: chat resources rails]
 
     D --> E
-    E --> F[Flask API proxy]
-    F --> G[ADK SidekickCoordinator]
+    E --> F{Request type}
+    F -- Chats inventory speech --> UiApi[Flask /ui-api JSON]
+    F -- Agent turn --> ApiProxy[Flask /api proxy]
+    UiApi --> DBui[(AlloyDB chats messages grants)]
+    ApiProxy --> MemInj[Memory embed + preamble on run]
+    MemInj --> G[ADK SidekickCoordinator]
 
     G --> H{Intent routing}
     H --> I[TaskSpecialist]
@@ -122,31 +130,31 @@ flowchart TD
     H --> K[NotesSpecialist]
     H --> L[Full Inventory Flow]
 
-    I --> M[Tasks tools]
-    J --> N[Schedule tools + time sanitize to UTC]
-    K --> O[Notes tools]
-    L --> P[list_sidekick_inventory]
+    I --> TaskTools[Tasks tools]
+    J --> SchedTools[Schedule tools + time sanitize to UTC]
+    K --> NotesTools[Notes tools]
+    L --> InvTool[list_sidekick_inventory]
 
-    M --> Q{Google API enabled?}
-    N --> R{Google API enabled?}
-    O --> S{Google API enabled?}
+    TaskTools --> Q{Google API enabled?}
+    SchedTools --> R{Google API enabled?}
+    NotesTools --> S{Google API enabled?}
 
     Q -- Yes --> T[Google Tasks update]
-    Q -- No --> U[DB-only task update]
+    Q -- No --> Uonly[DB-only task update]
     R -- Yes --> V[Google Calendar update]
     R -- No --> W[DB-only calendar update]
-    S -- Yes --> X[Google Keep update]
+    S -- Yes --> X[Google Docs update]
     S -- No --> Y[DB-only notes update]
 
     T --> Z[AlloyDB backup sync]
     V --> Z
     X --> Z
-    U --> Z
+    Uonly --> Z
     W --> Z
     Y --> Z
 
     Z --> AA[Unified response to UI]
-    AA --> AB[User views/edits items in Sidekick UI]
+    AA --> AB[User in Vue SPA: chat rail + central view]
 ```
 
 ### Use Case Diagram
@@ -164,21 +172,27 @@ flowchart LR
     U --> UC3[List all inventory]
     U --> UC4[Update/Delete items from UI]
     U --> UC5[Ask multi-step workflow in chat]
+    U --> UC6[Multiple chats rename archive]
+    U --> UC7[Voice dictation + optional telemetry rail]
 
     UC1 --> SK
     UC2 --> SK
     UC3 --> SK
     UC4 --> SK
     UC5 --> SK
+    UC6 --> SK
+    UC7 --> SK
 
     SK --> SC1[Coordinator routes to specialist]
     SK --> SC2[Execute tools]
     SK --> SC3[Return unified response]
     SK --> SC4[Persist and query structured data]
+    SK --> SC5["/ui-api: chats, inventory, speech"]
 
     SC2 --> GA
     SC2 --> MCP
     SC4 --> DB
+    SC5 --> DB
     GA --> DB
 ```
 
@@ -187,7 +201,7 @@ flowchart LR
 ```mermaid
 flowchart TB
   U[User Browser] --> D[sidekick.amngupta.com]
-  D --> CR[Cloud Run: Flask UI + API Proxy + ADK Runtime]
+  D --> CR[Cloud Run: Flask OAuth + Vue dist + /api + /ui-api + ADK]
 
   subgraph AGENTS[Multi-Agent Layer]
     COORD[SidekickCoordinator]
@@ -209,25 +223,28 @@ flowchart TB
   subgraph TOOLS[Tool Execution]
     GT[Google Tasks API]
     GC[Google Calendar API]
-    GK[Google Keep API]
+    GD[Google Docs API]
     MCP[MCP Toolsets optional]
   end
 
   TS --> GT
   SS --> GC
-  NS --> GK
+  NS --> GD
   TS -. optional .-> MCP
   SS -. optional .-> MCP
   NS -. optional .-> MCP
 
   subgraph DATA[Data Layer]
-    ADB[AlloyDB PostgreSQL]
+    ADB[AlloyDB: tasks calendar notes oauth]
+    CHAT[Chats messages telemetry memory grants]
   end
 
   GT --> ADB
   GC --> ADB
-  GK --> ADB
+  GD --> ADB
   INV --> ADB
+  CR --> CHAT
+  CHAT --> ADB
 
   subgraph NET[Network + Hosting]
     VPC[Same VPC: Cloud Run <-> AlloyDB private connectivity]
@@ -248,7 +265,9 @@ flowchart LR
 
   subgraph VPC[Shared VPC]
     subgraph CR[Cloud Run]
-      subgraph SK[Sidekick Application]
+      SPA[Vue SPA static/dist]
+      Flask[Flask OAuth + /ui-api + /api proxy]
+      subgraph SK[ADK agents]
         C[Coordinator Agent]
         A1[Task Specialist]
         A2[Schedule Specialist]
@@ -258,13 +277,15 @@ flowchart LR
     end
 
     subgraph ADB[AlloyDB]
-      DB[Structured User Data]
+      DB[Inventory + chats + memory + telemetry]
     end
 
+    D --> SPA
+    SPA --> Flask
+    Flask <--> SK
+    Flask <--> DB
     SK <--> DB
   end
-
-  D --> SK
 
   C --> A1
   C --> A2
@@ -276,7 +297,7 @@ flowchart LR
 
   A1 --> GT[Google Tasks]
   A2 --> GC[Google Calendar]
-  A3 --> GK[Google Keep]
+  A3 --> GD[Google Docs]
 
   C -->|Unified response| U
 ```
@@ -285,24 +306,29 @@ flowchart LR
 
 **Production:** the landing page has **no chat** until you **Sign in with Google**; after that you can talk to the assistant.
 
-Sidekick can reach **Google** in three ways: **OAuth 2.0 / OpenID Connect** (sign-in, refresh tokens, and user profile), the **Google Calendar API** (for Google Calendar events), the **Google Tasks API** (for Google Tasks), the **Google Keep API** (for Google Keep), and **Vertex AI** for **Gemini** (orchestrating agents and natural-language time parsing).
+Sidekick uses **Google** for **OAuth 2.0 / OpenID Connect** (sign-in, refresh tokens, and user profile), optional **Calendar**, **Tasks**, and **Docs + Drive** APIs (when tools sync data), **Vertex AI** / **Gemini** (agents and natural-language time parsing), and **Cloud Speech-to-Text** (optional **voice dictation** into the chat composer via `/ui-api/speech/transcribe`).
 
 ```mermaid
 flowchart TD
-  A([Open Sidekick]) --> B[Landing page — no chat yet]
+  A([Open Sidekick]) --> B[Vue SPA landing — no chat yet]
   B --> C[Sign in with Google]
   C --> D[You can use the chat]
-  D --> E[You send a message]
-  E --> F[ADK: Gemini on Vertex AI + coordinator and specialists]
+  D --> Cmp[Composer: type or voice dictation]
+  Cmp -.->|mic WebM Opus| Stt[Cloud Speech-to-Text via /ui-api/speech/transcribe]
+  Stt -.-> Cmp
+  Cmp --> E[You send a message]
+  E --> Px[Flask /api: optional memory preamble from sidekick_memory]
+  Px --> F[ADK: Gemini on Vertex AI + coordinator and specialists]
   F --> DB[(AlloyDB for your owner_sub)]
-  F -.-> APIs[Google Calendar Events, Tasks, Keep — when a tool updates them]
+  F -.-> APIs[Google Calendar Events, Tasks, Docs — when a tool updates them]
   DB --> R[Assistant reply in chat — only after tools finish, including any Google API updates]
   APIs -.-> R
   R --> D
 ```
 
 - **Landing:** no composer until you are signed in (see the **Public** block in the big-picture diagram).
-- **Each turn:** specialists may write to **AlloyDB** and, when integrations are on, call **Calendar / Tasks / Keep**; the next message appears **after** those tool calls complete. The chat UI does **not** show user ids on each item.
+- **Voice:** dictation only **fills the composer** with transcribed text; the assistant turn is still a normal **`/api`** message once you send it (same OAuth and `owner_sub` rules as typing).
+- **Each turn:** specialists may write to **AlloyDB** and, when integrations are on, call **Calendar / Tasks / Docs**; the next message appears **after** those tool calls complete. The chat UI does **not** show user ids on each item.
 - **Full inventory:** a single user message can trigger **`list_sidekick_inventory`** plus **three** specialist interpretation passes (tasks, then calendar, then notes) before the final reply—see the inventory sequence diagram below.
 
 ### How the assistant is organized (conceptual)
@@ -328,7 +354,7 @@ flowchart TB
 
   TaskSpec --> TT[Task tools DB and/or Google Tasks]
   SchedSpec --> ST[Schedule tools DB Calendar API time helper]
-  NotesSpec --> NT[Notes tools DB and/or Keep]
+  NotesSpec --> NT[Notes tools DB and/or Google Docs]
 
   subgraph AlloyDB["AlloyDB — all tool rows keyed by owner_sub"]
     direction TB
@@ -351,21 +377,21 @@ flowchart TB
 
   TT -.-> GTasks[Google Tasks API]
   ST -.-> GCal[Google Calendar API]
-  NT -.-> GKeep[Google Keep API]
+  NT -.-> GDocs[Google Docs API]
 ```
 
 The **coordinator** usually routes to **one specialist** per sub-request. For a **full Sidekick inventory** (list everything across tasks, calendar, and notes), it calls **`list_sidekick_inventory`**, summarizes, then **transfers in order** to **TaskSpecialist → ScheduleSpecialist → NotesSpecialist** so each domain interprets its slice and the coordinator synthesizes next actions (suggestions only unless the user asked to change data). **Specialists also have `list_sidekick_inventory`** when they need cross-domain context on other turns. Specialists call **database tools** and, when OAuth scopes and APIs allow, **Google** tools; **`sidekick_google_oauth`** holds refresh tokens for those calls.
 
 ### ADK agent architecture (as implemented)
 
-This is the “wiring diagram” of what actually runs in this repo: `main.py` starts an internal ADK FastAPI server, the Flask app proxies `/api/*` to it, injects the signed-in user’s `sub` as ADK `user_id`, and the ADK root agent (`SidekickCoordinator`) delegates with **`transfer_to_agent`**—usually **one specialist** per sub-request, except for a **full inventory** turn where Root runs **`list_sidekick_inventory`** then chains **Task → Schedule → Notes** before synthesizing.
+This is the “wiring diagram” of what actually runs in this repo: `main.py` starts an internal ADK FastAPI server, the Flask app serves the **Vite-built Vue** bundle from `static/dist/`, registers **`/ui-api/*`** (inventory, chats, speech), proxies **`/api/*`** to ADK, injects the signed-in user’s `sub` as ADK `user_id`, **`active_chat_id`** on runs when `X-Sidekick-Chat-Id` is set, and may **prepend a memory block** (embedding lookup on `sidekick_memory`) before forwarding **`/run`**. The ADK root agent (`SidekickCoordinator`) delegates with **`transfer_to_agent`**—usually **one specialist** per sub-request, except for a **full inventory** turn where Root runs **`list_sidekick_inventory`** then chains **Task → Schedule → Notes** before synthesizing.
 
 ```mermaid
 flowchart TB
-  Browser["Browser SPA"]
+  Browser["Browser Vue SPA"]
   subgraph Runtime["Sidekick runtime (one container)"]
     direction TB
-    Flask["Flask app + OAuth + /api proxy<br/>main.py"]
+    Flask["Flask + OAuth + /ui-api + /api proxy<br/>run: memory preamble · main.py"]
     ADK["ADK FastAPI server<br/>get_fast_api_app"]
     subgraph Graph["ADK agent graph<br/>sidekick/agent.py"]
       Root["SidekickCoordinator<br/>root_agent"]
@@ -385,17 +411,19 @@ flowchart TB
 
   subgraph Tools["Tool backends"]
     direction TB
-    DB["PostgreSQL / AlloyDB<br/>owner_sub row ownership"]
-    Vertex["Vertex AI Gemini<br/>LLM + time parsing helper"]
+    DB["PostgreSQL / AlloyDB<br/>tasks calendar notes oauth"]
+    ChatMem["Chats messages telemetry<br/>memory grants"]
+    Vertex["Vertex AI Gemini<br/>LLM + time parsing + embed helper"]
     GTasks["Google Tasks API"]
     GCal["Google Calendar API"]
-    GKeep["Google Keep API"]
+    GDocs["Google Docs API"]
     MCP["MCP toolsets (optional)<br/>SIDEKICK_MCP_*"]
   end
 
-  Browser -->|static pages + OAuth| Flask
-  Browser -->|/api proxy| Flask
-  Flask -->|rewrite user path + user_id in run body| ADK
+  Browser -->|SPA routes + OAuth| Flask
+  Browser -->|/api and /ui-api| Flask
+  Flask -->|rewrite path user_id state_delta run body| ADK
+  Flask --> ChatMem
   ADK --> Root
 
   Task --> DB
@@ -406,7 +434,7 @@ flowchart TB
   Sched --> Vertex
   Task -.->|when enabled| GTasks
   Sched -.->|when enabled| GCal
-  Notes -.->|when enabled| GKeep
+  Notes -.->|when enabled| GDocs
   Task -.->|optional| MCP
   Sched -.->|optional| MCP
   Notes -.->|optional| MCP
@@ -418,21 +446,25 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-  participant UI as Browser UI
-  participant Web as Flask /api proxy
+  participant UI as Vue SPA
+  participant Web as Flask /api + /ui-api
   participant ADK as ADK FastAPI
   participant Root as SidekickCoordinator
   participant Spec as Specialist agent
   participant DB as AlloyDB/Postgres
   participant G as Google APIs (optional)
 
-  UI->>Web: POST /api/.../run (message)
-  Note right of Web: If OAuth on: require session. Inject user_id = user_sub.
-  Web->>ADK: Forward rewritten request
+  UI->>Web: POST /api/.../run (message + optional X-Sidekick-Chat-Id)
+  Note right of Web: OAuth on: session required. Set user_id, state_delta.active_chat_id, optional memory preamble from sidekick_memory.
+  opt Relevant memories for this user text
+    Web->>DB: Embed query + read sidekick_memory
+    DB-->>Web: Top-K memory texts
+  end
+  Web->>ADK: Forward rewritten JSON body
   ADK->>Root: Run root_agent
   Root->>Spec: transfer_to_agent (Tasks/Schedule/Notes)
   Spec->>DB: Tool calls (CRUD rows for owner_sub)
-  Spec-->>G: Tool calls (Calendar/Tasks/Keep) when enabled
+  Spec-->>G: Tool calls (Calendar/Tasks/Docs) when enabled
   Spec-->>Root: Tool results
   Root-->>ADK: Final response text
   ADK-->>Web: HTTP response (JSON)
@@ -445,8 +477,8 @@ When the user asks to list everything Sidekick-tagged across tasks, calendar, an
 
 ```mermaid
 sequenceDiagram
-  participant UI as Browser UI
-  participant Web as Flask /api proxy
+  participant UI as Vue SPA
+  participant Web as Flask /api + /ui-api
   participant ADK as ADK FastAPI
   participant Root as SidekickCoordinator
   participant Inv as list_sidekick_inventory
@@ -456,12 +488,12 @@ sequenceDiagram
   participant DB as AlloyDB/Postgres
   participant G as Google APIs (optional)
 
-  UI->>Web: POST /api/.../run (inventory message)
-  Web->>ADK: Forward with user_id
+  UI->>Web: POST /api/.../run (inventory message + optional X-Sidekick-Chat-Id)
+  Web->>ADK: Forward with user_id + state_delta
   ADK->>Root: Run root_agent
   Root->>Inv: Tool call (combined inventory JSON)
   Inv->>DB: Read tasks / events / notes (and/or Google-backed paths)
-  Inv-->>G: List Tasks/Calendar/Keep when APIs enabled
+  Inv-->>G: List Tasks/Calendar/Docs when APIs enabled
   Inv-->>Root: JSON payload
   Root->>Task: transfer_to_agent (interpret tasks section)
   Task-->>Root: Domain notes / suggestions
@@ -479,11 +511,11 @@ sequenceDiagram
 ## For developers
 
 - **Run locally:** configure environment from `.env.example`, install dependencies (e.g. `uv sync`), run `python main.py`.
-- **OAuth vs UI:** When `GOOGLE_OAUTH_CLIENT_ID` / `SECRET` are set, `static/index.html` hides the chat until `/auth/me` shows a signed-in user and returns **401** on `/api` without a session—matching the public-vs-authenticated diagram above. Omit those vars only for local open testing.
-- **Code map:** `main.py` serves the UI and proxies the agent API; `sidekick/agent.py` defines the multi-agent graph; `sidekick/db.py` handles the database; Google integrations live in `sidekick/google_*` modules.
+- **OAuth vs UI:** When `GOOGLE_OAUTH_CLIENT_ID` / `SECRET` are set, the Vue app hides the chat until `/auth/me` shows a signed-in user; Flask returns **401** on **`/api`** and **`/ui-api`** without a session—matching the public-vs-authenticated diagram above. Omit those vars only for local open testing.
+- **Code map:** `main.py` serves the built SPA from `static/dist/` and proxies **`/api/*`** to ADK; **`/ui-api/*`** is implemented in `sidekick/flask_*_api.py`; `sidekick/agent.py` defines the multi-agent graph; `sidekick/db.py` handles the database; Google integrations live in `sidekick/google_*` modules.
 
 Python modules include **module and function docstrings** describing behavior and configuration hooks.
 
 ## Legal and policy pages
 
-**Privacy Policy** and **Terms of Service** are always reachable without signing in (`/privacy-policy`, `/terms-and-conditions`). On the **homepage** (`/`), visitors without a session still see the header and footer (including those links) but **not** the chat composer—that stays behind the login wall until Google sign-in completes (`static/index.html`).
+**Privacy Policy** and **Terms of Service** are always reachable without signing in (`/privacy-policy`, `/terms-and-conditions`); Flask serves the same **`static/dist/index.html`** bundle as `/`, and the client router picks the view. On the **homepage** (`/`), visitors without a session still see the header and footer (including those links) but **not** the chat composer—that stays behind the login wall until Google sign-in completes.

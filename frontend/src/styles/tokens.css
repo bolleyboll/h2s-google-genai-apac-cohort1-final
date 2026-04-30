@@ -1,0 +1,160 @@
+:root {
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --sidebar-w: 260px;
+}
+[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --surface-2: #f0f1f4;
+  --sidebar: #ffffff;
+  --sidebar-fg: #1a1d21;
+  --sidebar-muted: #6b7280;
+  --sidebar-active: #eef2ff;
+  --border: #e2e5eb;
+  --border-strong: #cbd0d9;
+  --text: #1a1d21;
+  --muted: #5c6370;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --on-accent: #ffffff;
+  --user-bubble: #eef2ff;
+  --bot-bubble: #ffffff;
+  --error-bg: #fef2f2;
+  --error-border: #fecaca;
+  --error-text: #991b1b;
+  --warn-bg: #fffbeb;
+  --warn-border: #fde68a;
+  --warn-text: #92400e;
+  --code-bg: #f3f4f6;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #131316;
+  --surface: #1d1d20;
+  --surface-2: #26262b;
+  --sidebar: #18181b;
+  --sidebar-fg: #f5f5f5;
+  --sidebar-muted: #9ca3af;
+  --sidebar-active: #2c2e3a;
+  --border: #2e2e35;
+  --border-strong: #404048;
+  --text: #f0f0f3;
+  --muted: #a1a1aa;
+  --accent: #60a5fa;
+  --accent-hover: #93c5fd;
+  --on-accent: #0c1220;
+  --user-bubble: #232b3d;
+  --bot-bubble: #1d1d20;
+  --error-bg: #3f1d1d;
+  --error-border: #7f1d1d;
+  --error-text: #fecaca;
+  --warn-bg: #3a2e10;
+  --warn-border: #b45309;
+  --warn-text: #fde68a;
+  --code-bg: #25252a;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+button { font: inherit; cursor: pointer; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+pre, code {
+  background: var(--code-bg);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+pre { padding: 0.75rem 1rem; overflow-x: auto; }
+code { padding: 0.1em 0.35em; }
+pre > code { padding: 0; background: transparent; }
+
+#app { display: flex; height: 100vh; width: 100%; }
+
+/* Reusable atoms used in many components — keep global so `<style scoped>` doesn't fragment them. */
+.icon-btn {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+}
+.icon-btn:hover { background: var(--surface-2); }
+.icon-btn svg { width: 1.05rem; height: 1.05rem; }
+.icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  border-radius: 8px;
+  font-weight: 500;
+}
+.btn:hover { background: var(--surface-2); }
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-danger {
+  color: var(--error-text);
+  border-color: var(--error-border);
+  background: var(--error-bg);
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+.chip.shared { background: var(--accent); color: var(--on-accent); }
+
+.empty-state {
+  padding: 3rem 1rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.modal-error {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--error-border);
+  background: var(--error-bg);
+  color: var(--error-text);
+  font-size: 0.85rem;
+  border-radius: 8px;
+}
+
+.scrim { display: none; }
+@media (max-width: 720px) {
+  :root { --sidebar-w: 240px; }
+  .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 40;
+  }
+}
